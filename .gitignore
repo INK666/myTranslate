@@ -1,0 +1,43 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Kotlin 编译缓存
+/.kotlin/
+
+# IDE 配置
+/.idea/
+/.vscode/
+
+# 构建输出
+/app/build/
+/app/release/
+
+# 临时文件和测试文件
+*.txt
+!gradle.properties
+
+# Kiro AI 助手配置（可选，看你是否想分享）
+/.kiro/
+
+# Trae 配置（可选）
+/.trae/
+
+# Bug 调试文件夹
+/bug/
+
+# 文档（如果不想上传可以取消注释）
+ /docs/
+*.md
