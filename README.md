@@ -5,12 +5,10 @@
 ![Version](https://img.shields.io/badge/version-1.4-blue)
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![MinSDK](https://img.shields.io/badge/minSdk-24-orange)
-![License](https://img.shields.io/badge/license-MIT-purple)
 
 一款功能强大的 Android 屏幕实时翻译应用，支持多种翻译模式和引擎
 
-[功能特性](#功能特性) • [下载安装](#下载安装) • [使用指南](#使用指南) • [技术架构](#技术架构) • [开发计划](#开发计划)
-
+[功能特性] • [下载安装]• [使用指南]• [技术架构]
 </div>
 
 ---
