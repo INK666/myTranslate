@@ -41,6 +41,7 @@
 - **免费在线翻译**：谷歌翻译、Bing 翻译
 - **自定义 API**：支持 OpenAI 兼容接口
 - **多模态视觉模型**：直接识图翻译，跳过 OCR 步骤
+![Screenshot_20260201_151155](https://github.com/user-attachments/assets/0703cc4d-385a-42ed-a2e7-64d8b9a2f1f6)
 
 ### ✨ 特色功能
 
