@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![MinSDK](https://img.shields.io/badge/minSdk-24-orange)
 
-一款功能强大的 Android 屏幕实时翻译应用，支持多种翻译模式和引擎
+ Android 屏幕实时翻译应用，支持多种翻译模式和引擎
 
 [功能特性] • [下载安装]• [使用指南]• [技术架构]
 </div>
@@ -17,7 +17,7 @@
 
 ### 🎯 核心功能
 
-- **悬浮球快速翻译**：通过悬浮球一键触发屏幕翻译
+支持openai兼容大模型，支持多模态大模型以提高图像识别精准度。
 - **多种翻译模式**：
   - 单次翻译：全屏或区域选择翻译
   - 固定区域：循环翻译指定区域（适合游戏对话框）
