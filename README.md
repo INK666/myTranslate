@@ -42,7 +42,7 @@
 
 ### ✨ 特色功能
 
-- **漫画优化**：针对日漫竖排文字优化识别算法，智能排序文本块
+- **漫画优化**：针对日漫竖排文字优化，复杂漫画可使用多模态大模型识别
 - **翻译缓存**：LRU 缓存机制，提升重复翻译速度
 - **资源管理**：内存监控、HTTP 连接池、OCR 引擎池等优化
 - **图文翻译**：支持从相册或相机选择图片进行翻译
@@ -102,9 +102,15 @@
 ### 漫画翻译技巧
 
 1. 启用"漫画模式"（设置页面）
-2. 选择"自动区域"模式
+2. 选择"固定区域"模式
 3. 框选漫画对话区域
 4. 应用会自动识别竖排文字并正确排序
+
+
+### 复杂画面漫画翻译
+1.进入设置栏 配置多模态大模型-开启多模态开关
+2.选中多模态引擎为翻译模型，自动跳过本地ocr
+
 
 ---
 
@@ -151,60 +157,14 @@ app/src/main/java/com/example/mytransl/
 - **OCR 优化**：引擎池管理、rowPadding 检查
 - **翻译优化**：LRU 缓存、防抖机制
 
----
 
-## 🗺️ 开发计划
-
-### v1.5 计划
-- [ ] 支持更多语言（西班牙语、阿拉伯语等）
-- [ ] 添加翻译历史记录
-- [ ] 支持自定义悬浮球样式
-- [ ] 优化电池续航
-
-### v2.0 计划
-- [ ] 支持实时语音翻译
-- [ ] 添加 AR 翻译模式
-- [ ] 支持多窗口同时翻译
-- [ ] 云端同步配置
-
----
-
-## 🤝 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
 
 ### 开发环境
 - Android Studio Hedgehog | 2023.1.1 或更高版本
 - JDK 17
 - Gradle 8.0+
 
-### 提交规范
-- 遵循 [Conventional Commits](https://www.conventionalcommits.org/)
-- 代码风格遵循 Kotlin 官方规范
-- 提交前请运行测试
 
----
-
-## 📄 开源协议
-
-本项目采用 [MIT License](LICENSE) 开源协议
-
----
-
-## 🙏 致谢
-
-- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) - 高精度 OCR 引擎
-- [ML Kit](https://developers.google.com/ml-kit) - Google 机器学习工具包
-- [Jetpack Compose](https://developer.android.com/jetpack/compose) - 现代 Android UI 工具包
-
----
-
-## 📧 联系方式
-
-- GitHub Issues: [提交问题](https://github.com/INK666/myTranslate/issues)
-- Email: [你的邮箱]
-
----
 
 <div align="center">
 
