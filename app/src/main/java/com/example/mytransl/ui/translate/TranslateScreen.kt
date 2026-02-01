@@ -73,6 +73,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.mytransl.data.codec.BeastCodec
+import com.example.mytransl.data.codec.Base64Codec
 import java.io.File
 
 // Modern Color Palette
@@ -104,7 +105,7 @@ fun TranslateScreen() {
     var isTranslating by remember { mutableStateOf(false) }
     
     // Modes
-    val modes = listOf("文本翻译", "兽音加解密", "图像识别")
+    val modes = listOf("文本翻译", "兽音加解密", "Base64 编解码", "图像识别")
     var currentMode by rememberSaveable { mutableStateOf("文本翻译") }
 
     // Image Recognition State
@@ -175,6 +176,11 @@ fun TranslateScreen() {
     // Beast Mode State
     var beastAction by rememberSaveable { mutableStateOf("加密") }
     
+    // Base64 Mode State
+    var base64Action by rememberSaveable { mutableStateOf("编码") }
+    var base64Charset by rememberSaveable { mutableStateOf("UTF-8") }
+    var base64FilterNonBase64 by rememberSaveable { mutableStateOf(true) }
+    
     // Engine selection
     var selectedEngineId by rememberSaveable { mutableStateOf<String?>(null) }
     
@@ -234,6 +240,12 @@ fun TranslateScreen() {
                     } else {
                         // Decode attempts auto-detection inside BeastCodec, falling back to settings.beastChars
                         BeastCodec.decode(inputText, settings.beastChars)
+                    }
+                } else if (currentMode == "Base64 编解码") {
+                    if (base64Action == "编码") {
+                        Base64Codec.encode(inputText, base64Charset)
+                    } else {
+                        Base64Codec.decode(inputText, base64Charset, base64FilterNonBase64)
                     }
                 } else if (currentMode == "图像识别") {
                      val bitmap = selectedImageBitmap!!
@@ -325,6 +337,15 @@ fun TranslateScreen() {
                         repo = repo,
                         scope = scope
                     )
+                } else if (currentMode == "Base64 编解码") {
+                    Base64ModeControls(
+                        base64Action = base64Action,
+                        onActionChange = { base64Action = it },
+                        charset = base64Charset,
+                        onCharsetChange = { base64Charset = it },
+                        filterNonBase64 = base64FilterNonBase64,
+                        onFilterChange = { base64FilterNonBase64 = it }
+                    )
                 } else {
                     val sourceOptions = if (currentMode == "图像识别") {
                         languages.filter { it != "自动检测" }
@@ -382,7 +403,12 @@ fun TranslateScreen() {
                     },
                     onTranslate = { doTranslate() },
                     isTranslating = isTranslating,
-                    actionLabel = if (currentMode == "文本翻译") "翻译" else if (beastAction == "加密") "加密" else "解密"
+                    actionLabel = when (currentMode) {
+                        "文本翻译" -> "翻译"
+                        "兽音加解密" -> if (beastAction == "加密") "加密" else "解密"
+                        "Base64 编解码" -> if (base64Action == "编码") "编码" else "解码"
+                        else -> "翻译"
+                    }
                 )
             }
             
@@ -391,7 +417,11 @@ fun TranslateScreen() {
                 ModernOutputCard(
                     outputText = outputText,
                     onOutputChange = { outputText = it },
-                    targetLang = if (currentMode == "兽音加解密") (if (beastAction == "加密") "兽音密文" else "解密结果") else targetLang,
+                    targetLang = when (currentMode) {
+                        "兽音加解密" -> if (beastAction == "加密") "兽音密文" else "解密结果"
+                        "Base64 编解码" -> if (base64Action == "编码") "Base64 编码" else "解码结果"
+                        else -> targetLang
+                    },
                     onCopy = {
                         clipboardManager.setText(AnnotatedString(outputText))
                         Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
@@ -935,6 +965,165 @@ fun BeastModeControls(
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 4.dp, start = 4.dp)
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun Base64ModeControls(
+    base64Action: String,
+    onActionChange: (String) -> Unit,
+    charset: String,
+    onCharsetChange: (String) -> Unit,
+    filterNonBase64: Boolean,
+    onFilterChange: (Boolean) -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceColor),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier.border(1.dp, BorderColor, RoundedCornerShape(20.dp))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            // Action Switcher
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                listOf("编码", "解码").forEach { action ->
+                    val isSelected = base64Action == action
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { onActionChange(action) },
+                        label = { 
+                            Text(
+                                action, 
+                                modifier = Modifier.fillMaxWidth(), 
+                                textAlign = TextAlign.Center,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            ) 
+                        },
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape = RoundedCornerShape(50),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PrimaryColor,
+                            selectedLabelColor = Color.White,
+                            containerColor = BackgroundColor,
+                            labelColor = TextSecondary,
+                            disabledContainerColor = BackgroundColor,
+                            disabledLabelColor = TextTertiary
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isSelected,
+                            borderColor = if (isSelected) PrimaryColor else BorderColor
+                        )
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            // Charset Selector
+            Text(
+                "字符编码", 
+                style = MaterialTheme.typography.labelMedium, 
+                color = TextSecondary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            var expanded by remember { mutableStateOf(false) }
+            val charsets = listOf("UTF-8", "GBK", "GB2312", "ISO-8859-1", "US-ASCII")
+            
+            Box {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(BackgroundColor)
+                        .border(1.dp, BorderColor, RoundedCornerShape(12.dp))
+                        .clickable { expanded = true }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = charset,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary
+                    )
+                    Icon(Icons.Default.ArrowDropDown, null, tint = TextSecondary)
+                }
+                
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.background(SurfaceColor)
+                ) {
+                    charsets.forEach { cs ->
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    cs,
+                                    fontWeight = if (cs == charset) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (cs == charset) PrimaryColor else TextPrimary
+                                ) 
+                            },
+                            onClick = {
+                                onCharsetChange(cs)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            
+            // Filter Non-Base64 Characters (only show when decoding)
+            AnimatedVisibility(visible = base64Action == "解码") {
+                Column {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(BackgroundColor)
+                            .clickable { onFilterChange(!filterNonBase64) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "解码时过滤非 Base64 字符",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = TextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                "自动移除非法字符（推荐）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                        
+                        Switch(
+                            checked = filterNonBase64,
+                            onCheckedChange = onFilterChange,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = PrimaryColor,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = TextTertiary
+                            )
+                        )
+                    }
+                }
             }
         }
     }
