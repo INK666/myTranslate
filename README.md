@@ -25,13 +25,11 @@
 - **灵活显示方式**：
   - 覆盖原文：译文直接覆盖在原文位置
   - 独立窗口：译文显示在可拖动的浮窗中
-
 <div align="center">
   <img src="https://github.com/user-attachments/assets/31ce73b7-0272-4919-89c9-07c6d1618949" width="250" alt="截图1">
   <img src="https://github.com/user-attachments/assets/73164abd-d94a-45c7-aa75-eaadf009e7d2" width="250" alt="截图2">
   <img src="https://github.com/user-attachments/assets/302225f5-5571-4904-8ef9-ccc3cad0cea4" width="250" alt="截图3">
 </div>
-
 ### 🔧 翻译引擎
 
 #### 本地 OCR 引擎
