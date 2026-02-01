@@ -1,4 +1,4 @@
-# MyTransl - Android 实时屏幕翻译工具
+# MyT - Android 实时屏幕翻译工具
 
 <div align="center">
 
