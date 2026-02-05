@@ -277,6 +277,277 @@ class OnlineApiEngine(
             throw IllegalStateException("空响应")
         }
     }
+    override suspend fun translateBatch(
+        batch: List<String>,
+        sourceLanguage: String?,
+        targetLanguage: String,
+        settings: SettingsState
+    ): List<String> = withContext(Dispatchers.IO) {
+        if (batch.isEmpty()) return@withContext emptyList()
+        
+        // Convert List to Map<Index, Text>
+        val batchMap = batch.mapIndexed { index, text -> index to text }.toMap()
+
+        val resolvedUrl = resolveApiUrl(config.baseUrl)
+        if (resolvedUrl.isEmpty()) {
+            // Fallback to sequential if URL invalid (though translate() handles empty URL check too)
+             return@withContext batch.map { "" }
+        }
+
+        val model = config.model.trim().ifEmpty { id }
+        val source = sourceLanguage?.trim()?.takeIf { it.isNotEmpty() }
+        val target = targetLanguage.trim().takeIf { it.isNotEmpty() } ?: "英语"
+
+        // 1. 构建输入 JSON 列表
+        val inputJsonArray = JSONArray()
+        batchMap.forEach { (id, text) ->
+            inputJsonArray.put(
+                JSONObject().put("id", id).put("text", text)
+            )
+        }
+        val inputJsonStr = inputJsonArray.toString()
+
+        val userPrompt = buildString {
+            if (source == null) {
+                append("将以下 JSON 数据中的 \"text\" 字段内容翻译成")
+                append(toPromptLanguage(target))
+            } else {
+                append("将以下 JSON 数据中的 \"text\" 字段内容从")
+                append(toPromptLanguage(source))
+                append("翻译成")
+                append(toPromptLanguage(target))
+            }
+            append("。请严格保持 JSON 格式返回，结构为 [{\"id\": 1, \"text\": \"译文\"}, ...]。\n")
+            append("数据内容：\n")
+            append(inputJsonStr)
+        }
+
+        val outputConstraint = when (target.trim()) {
+            "英语" -> ""
+            "中文" -> ""
+            else -> "输出语言必须与目标语言一致。"
+        }
+
+        val systemPrompt = """
+            # Role：JSON 翻译专家
+            ## Constraints：
+            - 你只输出标准的 JSON 数组，严禁包含 markdown 代码块标记（如 ```json）。
+            - 严禁输出任何解释性文字或前言/后缀。
+            - 必须保留原始 "id" 字段不变。
+            - 仅翻译 "text" 字段的值，不要修改键名。
+            - 如果原文无法翻译（如纯乱码），text 字段留空。
+            - 对每个text 独立翻译，
+            - 翻译完一个text后立即将译文对原文进行替换，替换完成才能翻译下一个text。
+            - 严禁对文本进行续写或补全，只翻译提供的片段。
+            $outputConstraint
+        """.trimIndent()
+
+        val customPrompt = config.prompt.trim().takeIf { it.isNotEmpty() }
+        val finalSystemPrompt = buildString {
+            append(systemPrompt)
+            if (customPrompt != null) {
+                append("\n\n")
+                append(customPrompt)
+            }
+        }
+
+        val messagesArray = JSONArray()
+        messagesArray.put(JSONObject().put("role", "system").put("content", finalSystemPrompt))
+        messagesArray.put(JSONObject().put("role", "user").put("content", userPrompt))
+
+        val payload = JSONObject()
+            .put("model", model)
+            .put("messages", messagesArray)
+            .put("temperature", 0)
+            .put("stream", false)
+            .put("max_tokens", (inputJsonStr.length * 2).coerceAtLeast(1024))
+            .toString()
+
+        val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
+        val requestBuilder = Request.Builder().url(resolvedUrl).post(body)
+        val apiKey = config.apiKey.trim()
+        if (apiKey.isNotEmpty()) {
+            requestBuilder.header("Authorization", "Bearer $apiKey")
+        }
+
+        try {
+            client.newCall(requestBuilder.build()).execute().use { resp ->
+                val raw = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                   // Log error and fallback? Or throw? Throwing allows Manager to handle.
+                   throw IllegalStateException("HTTP ${resp.code}: $raw")
+                }
+
+                val jsonResponse = runCatching { JSONObject(raw) }.getOrNull()
+                val content = jsonResponse
+                    ?.optJSONArray("choices")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("message")
+                    ?.optString("content")
+                    .orEmpty()
+                
+                var cleanContent = stripThinkTags(content).trim()
+                
+                val jsonStart = cleanContent.indexOf('[')
+                val jsonEnd = cleanContent.lastIndexOf(']')
+                if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                    cleanContent = cleanContent.substring(jsonStart, jsonEnd + 1)
+                }
+
+                val resultMap = mutableMapOf<Int, String>()
+                val resultJsonArray = runCatching { JSONArray(cleanContent) }.getOrNull()
+
+                if (resultJsonArray != null) {
+                    for (i in 0 until resultJsonArray.length()) {
+                        val item = resultJsonArray.optJSONObject(i)
+                        if (item != null) {
+                            val id = item.optInt("id", -1)
+                            val text = item.optString("text")
+                            if (id != -1) {
+                                resultMap[id] = text
+                            }
+                        }
+                    }
+                } else {
+                     val regex = Regex("\\{\"id\":\\s*(\\d+),\\s*\"text\":\\s*\"(.*?)\"\\}")
+                     regex.findAll(cleanContent).forEach { match ->
+                         val id = match.groupValues[1].toIntOrNull()
+                         val txt = match.groupValues[2]
+                         if (id != null) resultMap[id] = txt
+                     }
+                }
+                
+                // Convert Map back to List, preserving order
+                return@withContext batch.mapIndexed { index, _ -> 
+                    resultMap[index] ?: "" // Return empty string if failed, or maybe original? Empty implies failure.
+                }
+            }
+        } catch (t: Throwable) {
+            throw t
+        }
+    }
+    // 多模态识别并翻译，返回结构化数据（包含坐标）
+    suspend fun recognizeAndTranslate(
+        image: Bitmap,
+        sourceLanguage: String?,
+        targetLanguage: String,
+        settings: SettingsState
+    ): List<com.example.mytransl.domain.ocr.TextBlock> = withContext(Dispatchers.IO) {
+        val resolvedUrl = resolveApiUrl(config.baseUrl)
+        if (resolvedUrl.isEmpty()) throw IllegalArgumentException("API URL 为空")
+
+        val model = config.model.trim().ifEmpty { id }
+        val source = sourceLanguage?.trim()?.takeIf { it.isNotEmpty() } ?: "自动检测"
+        val target = targetLanguage.trim().takeIf { it.isNotEmpty() } ?: "中文"
+
+        val imgW = image.width.toFloat()
+        val imgH = image.height.toFloat()
+
+        val systemPrompt = """
+            # Role：视觉翻译专家
+            ## Task：
+            - 识别图片中的所有文字块。
+            - 将识别到的文字从${toPromptLanguage(source)}翻译成${toPromptLanguage(target)}。
+            - 确定每个文字块在图中的边界框（Bounds）。
+
+            ## Output Format：
+            请严格输出标准 JSON 列表，禁止包含 Markdown 标记或任何额外说明：
+            [
+              {
+                "translation": "翻译后的内容",
+                "bounds": [xmin, ymin, xmax, ymax]
+              }
+            ]
+            
+            ## Critical Constraints：
+             - **"translation" 字段必须是翻译后的${toPromptLanguage(target)}文字，严禁输出${toPromptLanguage(source)}原文。**
+             - 如果无法翻译，跳过该文字块，不要原样输出。
+
+            ## Coordinates：
+            - 坐标必须归一化到 [0, 1000] 范围。
+            - [0, 0] 为左上角，[1000, 1000] 为右下角。
+            - 格式为：[xmin, ymin, xmax, ymax]。
+        """.trimIndent()
+
+        val userPrompt = "开始任务。只输出 JSON。"
+
+        val customPrompt = config.prompt.trim().takeIf { it.isNotEmpty() }
+        val finalSystemPrompt = buildString {
+            append(systemPrompt)
+            if (customPrompt != null) {
+                append("\n\n")
+                append(customPrompt)
+            }
+        }
+
+        val payload = buildImagePayload(image, model, userPrompt, finalSystemPrompt)
+        val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val requestBuilder = Request.Builder().url(resolvedUrl).post(body)
+        val apiKey = config.apiKey.trim()
+        if (apiKey.isNotEmpty()) {
+            requestBuilder.header("Authorization", "Bearer $apiKey")
+        }
+
+        client.newCall(requestBuilder.build()).execute().use { resp ->
+            val raw = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                throw IllegalStateException("HTTP ${resp.code}: $raw")
+            }
+
+            val jsonResponse = runCatching { JSONObject(raw) }.getOrNull()
+            val content = jsonResponse
+                ?.optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                .orEmpty()
+            
+            var cleanContent = stripThinkTags(content).trim()
+            
+            // 某些 API 返回的 content 可能错误地保留了转义符，导致 JSON 解析失败
+            // 强制还原：将 \" 替换为 "
+            cleanContent = cleanContent.replace("\\\"", "\"")
+            
+            val jsonStart = cleanContent.indexOf('[')
+            val jsonEnd = cleanContent.lastIndexOf(']')
+            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                cleanContent = cleanContent.substring(jsonStart, jsonEnd + 1)
+            }
+
+            val resultList = mutableListOf<com.example.mytransl.domain.ocr.TextBlock>()
+            val jsonArray = runCatching { JSONArray(cleanContent) }.getOrNull()
+
+            if (jsonArray != null) {
+                for (i in 0 until jsonArray.length()) {
+                    val item = jsonArray.optJSONObject(i) ?: continue
+                    // 支持 translation, text, t 三种 key，兼容性拉满
+                    val text = item.optString("translation").ifEmpty { 
+                        item.optString("text").ifEmpty { 
+                           item.optString("t").ifEmpty { item.optString("origin") } 
+                        }
+                    }
+                    // 支持 bounds, b 两种 key
+                    val boundsArr = item.optJSONArray("bounds") ?: item.optJSONArray("b")
+                    
+                    if (text.isNotEmpty() && boundsArr != null && boundsArr.length() >= 4) {
+                        try {
+                            val x1 = boundsArr.getDouble(0).toFloat() / 1000f * imgW
+                            val y1 = boundsArr.getDouble(1).toFloat() / 1000f * imgH
+                            val x2 = boundsArr.getDouble(2).toFloat() / 1000f * imgW
+                            val y2 = boundsArr.getDouble(3).toFloat() / 1000f * imgH
+                            
+                            val rect = android.graphics.RectF(x1, y1, x2, y2)
+                            resultList.add(com.example.mytransl.domain.ocr.TextBlock(text, rect))
+                        } catch (e: Exception) {
+                            // ignore malformed bounds
+                        }
+                    }
+                }
+            }
+            return@withContext resultList
+        }
+    }
 }
 
 // 去除大模型返回的思考标签内容

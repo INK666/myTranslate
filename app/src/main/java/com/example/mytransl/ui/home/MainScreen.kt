@@ -137,6 +137,50 @@ fun MainScreen(
 
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                        // OCR Engine
+                        val ocrOptions = buildList {
+                            add(ToggleOption("PaddleOCR", "PaddleOCR", "📝"))
+                            // ML Kit 已隐藏，但后台逻辑保留
+                            // add(ToggleOption("MLKit", "ML Kit", "⚡"))
+                            draft.apiConfigs.forEach { cfg ->
+                                if (cfg.name.isNotBlank()) {
+                                    if (cfg.isVisualModel) {
+                                        add(ToggleOption(cfg.name, cfg.name, "📖"))
+                                    } else if (cfg.isOcrModel) {
+                                        add(ToggleOption(cfg.name, cfg.name, "👁️"))
+                                    }
+                                }
+                            }
+                        }.distinctBy { it.id }
+
+                        val activeOcrId = if (ocrOptions.any { it.id == draft.ocrEngine }) draft.ocrEngine else "PaddleOCR"
+
+                        EngineSection(
+                            label = "OCR 模型",
+                            badgeText = "RECOGNITION",
+                            colorTheme = ToggleTheme.Sky,
+                            options = ocrOptions,
+                            activeId = activeOcrId,
+                            onSelect = { id ->
+                                val config = draft.apiConfigs.find { it.name == id }
+                                val isVisual = config?.isVisualModel == true
+                                
+                                val nextDraft = if (isVisual) {
+                                    // Visual OCR implies Visual Translate
+                                    draft.copy(
+                                        ocrEngine = id,
+                                        defaultEngine = id
+                                    )
+                                } else {
+                                    // Standard OCR or Pure OCR: set OCR engine, revert Translate if it was Visual
+                                    val currentTranslateIsVisual = draft.apiConfigs.find { it.name == draft.defaultEngine }?.isVisualModel == true
+                                    val nextTranslate = if (currentTranslateIsVisual) "微软离线" else draft.defaultEngine
+                                    draft.copy(ocrEngine = id, defaultEngine = nextTranslate)
+                                }
+                                updateDraft(nextDraft)
+                            }
+                        )
+
                         // Translation Engine
                         val engineOptions = buildList {
                             add(ToggleOption("微软离线", "ML Kit", "🏠"))
@@ -145,8 +189,8 @@ fun MainScreen(
                             draft.apiConfigs.forEach { cfg ->
                                 if (cfg.name.isNotBlank()) {
                                     if (cfg.isVisualModel) {
-                                        add(ToggleOption(cfg.name, "${cfg.name} (视觉)", "👁️"))
-                                    } else {
+                                        add(ToggleOption(cfg.name, cfg.name, "📖"))
+                                    } else if (!cfg.isOcrModel) {
                                         add(ToggleOption(cfg.name, cfg.name, "🔗"))
                                     }
                                 }
@@ -166,10 +210,14 @@ fun MainScreen(
                             activeId = activeEngineId,
                             onSelect = { id ->
                                 val config = draft.apiConfigs.find { it.name == id }
-                                val next = if (config?.isVisualModel == true) {
-                                    draft.copy(defaultEngine = id, resultMode = "独立窗口")
+                                val isVisual = config?.isVisualModel == true
+
+                                val next = if (isVisual) {
+                                    draft.copy(defaultEngine = id, ocrEngine = id)
                                 } else {
-                                    draft.copy(defaultEngine = id)
+                                   val currentOcrIsVisual = draft.apiConfigs.find { it.name == draft.ocrEngine }?.isVisualModel == true
+                                   val nextOcr = if (currentOcrIsVisual) "PaddleOCR" else draft.ocrEngine
+                                   draft.copy(defaultEngine = id, ocrEngine = nextOcr)
                                 }
                                 updateDraft(next)
                             }
@@ -223,10 +271,7 @@ fun MainScreen(
                             ),
                             activeId = draft.resultMode,
                             onSelect = { mode ->
-                                val config = draft.apiConfigs.find { it.name == draft.defaultEngine }
-                                val isVisual = config?.isVisualModel == true
-                                val nextMode = if (isVisual) "独立窗口" else mode
-                                updateDraft(draft.copy(resultMode = nextMode))
+                                updateDraft(draft.copy(resultMode = mode))
                             }
                         )
                     }

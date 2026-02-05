@@ -28,12 +28,16 @@ async function fetchLatestRelease() {
         const release = await response.json();
 
         // 解析信息
-        // 假设你的 Tag 是 "v1.4"，Asset 中有 APK 文件
+        const rawUrl = release.assets.find((a: any) => a.name.endsWith(".apk"))?.browser_download_url;
+
+        // 使用 moeyy.cn 加速镜像（国内满速下载的最佳实践之一）
+        const download_url = rawUrl ? `https://moeyy.cn/gh-proxy/${rawUrl}` : "";
+
         const updateInfo = {
             version_name: release.tag_name.replace('v', ''),
-            version_code: parseVersionCode(release.tag_name), // 从 tag 或 body 解析
+            version_code: parseVersionCode(release.tag_name),
             changelog: release.body,
-            download_url: release.assets.find((a: any) => a.name.endsWith(".apk"))?.browser_download_url,
+            download_url: download_url,
             published_at: release.published_at
         };
 
@@ -48,10 +52,16 @@ async function fetchLatestRelease() {
 // 辅助函数：根据 tag 尝试解析 versionCode
 // 建议你的 GitHub Tag 规范化，例如 "v1.4.3" -> 10403
 function parseVersionCode(tagName: string): number {
-    const parts = tagName.replace('v', '').split('.').map(Number);
-    if (parts.length === 2) return parts[0] * 100 + parts[1];
-    if (parts.length === 3) return parts[0] * 10000 + parts[1] * 100 + parts[2];
-    return 0;
+    const cleanTag = tagName.replace(/[^0-9.]/g, '');
+    const parts = cleanTag.split('.').map(Number);
+
+    const major = parts[0] || 0;
+    const minor = parts[1] || 0;
+    const patch = parts[2] || 0;
+
+    // 必须和本地 104000 的逻辑保持一致
+    // 1.4 -> 1 * 100000 + 4 * 1000 + 0 = 104000
+    return major * 100000 + minor * 1000 + patch;
 }
 
 console.log("Deno server starting on http://localhost:8000");

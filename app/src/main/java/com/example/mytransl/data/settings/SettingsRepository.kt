@@ -23,7 +23,8 @@ data class ApiConfig(
     val modelOptions: List<String> = emptyList(),
     val prompt: String = "",
     val type: String = "openai", // "openai" or "microsoft"
-    val isVisualModel: Boolean = false
+    val isVisualModel: Boolean = false,
+    val isOcrModel: Boolean = false
 )
 
 data class SettingsState(
@@ -39,7 +40,8 @@ data class SettingsState(
     val autoOcrIntervalMs: Int = 3000,
     val autoSpeedMode: String = "字幕", // "正常" or "字幕"
     val beastChars: String = "嗷呜啊~",
-    val isMangaMode: Boolean = false
+    val isMangaMode: Boolean = false,
+    val ignoredVersionCode: Int = 0
 )
 
 class SettingsRepository(
@@ -59,6 +61,7 @@ class SettingsRepository(
         val AutoSpeedMode = stringPreferencesKey("auto_speed_mode")
         val BeastChars = stringPreferencesKey("beast_chars")
         val IsMangaMode = booleanPreferencesKey("is_manga_mode")
+        val IgnoredVersionCode = intPreferencesKey("ignored_version_code")
     }
 
     val settings: Flow<SettingsState> = context.settingsDataStore.data.map { prefs ->
@@ -87,7 +90,8 @@ class SettingsRepository(
             autoOcrIntervalMs = (prefs[Keys.AutoOcrIntervalMs] ?: SettingsState().autoOcrIntervalMs).coerceIn(300, 60_000),
             autoSpeedMode = prefs[Keys.AutoSpeedMode] ?: SettingsState().autoSpeedMode,
             beastChars = prefs[Keys.BeastChars] ?: SettingsState().beastChars,
-            isMangaMode = prefs[Keys.IsMangaMode] ?: SettingsState().isMangaMode
+            isMangaMode = prefs[Keys.IsMangaMode] ?: SettingsState().isMangaMode,
+            ignoredVersionCode = prefs[Keys.IgnoredVersionCode] ?: SettingsState().ignoredVersionCode
         )
     }
 
@@ -106,6 +110,7 @@ class SettingsRepository(
             prefs[Keys.AutoSpeedMode] = state.autoSpeedMode
             prefs[Keys.BeastChars] = state.beastChars
             prefs[Keys.IsMangaMode] = state.isMangaMode
+            prefs[Keys.IgnoredVersionCode] = state.ignoredVersionCode
         }
     }
 }
@@ -144,7 +149,8 @@ private fun parseApiConfigs(raw: String?): List<ApiConfig> {
                             modelOptions = modelOptions,
                             prompt = prompt,
                             type = type,
-                            isVisualModel = isVisualModel
+                            isVisualModel = isVisualModel,
+                            isOcrModel = obj.optBoolean("isOcrModel", false)
                         )
                     )
                 }
@@ -165,6 +171,7 @@ private fun serializeApiConfigs(configs: List<ApiConfig>): String {
             .put("prompt", cfg.prompt)
             .put("type", cfg.type)
             .put("isVisualModel", cfg.isVisualModel)
+            .put("isOcrModel", cfg.isOcrModel)
         arr.put(obj)
     }
     return arr.toString()

@@ -1,5 +1,7 @@
 package com.example.mytransl.ui.settings
 
+
+import com.example.mytransl.BuildConfig
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -29,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -77,6 +80,8 @@ private fun toMode(trigger: String, area: String): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    hasNewVersion: Boolean = false,
+    onCheckUpdate: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -93,6 +98,7 @@ fun SettingsScreen(
     var expandedIndices by remember { mutableStateOf(setOf<Int>()) }
     var testingIndices by remember { mutableStateOf(setOf<Int>()) }
     var testStatusByIndex by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var testResultDialog by remember { mutableStateOf<Pair<String, String>?>(null) } // Pair(Title, Content)
     var fetchingModelIndices by remember { mutableStateOf(setOf<Int>()) }
     var modelStatusByIndex by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     val testClient = remember { OkHttpClient() }
@@ -134,29 +140,12 @@ fun SettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    onClick = onBack,
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color.White,
-                    shadowElevation = 2.dp,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Slate700,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = "设置",
-                    fontSize = 24.sp,
+                    fontSize = 28.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Slate800,
                     modifier = Modifier.weight(1f)
@@ -175,6 +164,20 @@ fun SettingsScreen(
                     val context = LocalContext.current
                     IconButton(
                         onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://b23.tv/a25StC4"))
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_bilibili),
+                            contentDescription = "Bilibili",
+                            tint = Slate400,
+                            modifier = Modifier.size(16.dp).rotate(180f)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/INK666/myTranslate"))
                             context.startActivity(intent)
                         },
@@ -189,7 +192,7 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    text = "v1.4",
+                    text = "v${BuildConfig.VERSION_NAME}",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = Slate400
@@ -577,92 +580,101 @@ fun SettingsScreen(
                                     )
                                 }
 
+                                val statusText = testStatusByIndex[index].orEmpty()
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val statusText = testStatusByIndex[index].orEmpty()
-                                    Text(
-                                        text = statusText,
-                                        color = if (statusText.startsWith("失败")) Color.Red else Emerald500,
-                                        fontSize = 12.sp,
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    if (cfg.type != "microsoft") {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(end = 8.dp)
-                                        ) {
-                                            val visualTip =
-                                                "仅多模态模型可开启，使用此模型时会跳过本地ocr以实现更精密的图像翻译。"
-                                            IconButton(
-                                                onClick = {
-                                                    scope.launch {
-                                                        snackbarHostState.showSnackbar(visualTip)
-                                                    }
-                                                },
+                                    // 3-way Toggle: Text, OCR, Visual
+                                    val currentType = when {
+                                        cfg.isVisualModel -> "visual"
+                                        cfg.isOcrModel -> "ocr"
+                                        else -> "text"
+                                    }
+                                    
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Slate100)
+                                            .padding(3.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        listOf(
+                                            Triple("text", "文本", "✍️"),
+                                            Triple("ocr", "视觉", "👁️"),
+                                            Triple("visual", "多模态", "📖")
+                                        ).forEach { (id, label, icon) ->
+                                            val isSelected = currentType == id
+                                            Box(
                                                 modifier = Modifier
-                                                    .size(20.dp)
-                                                    .padding(end = 2.dp)
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isSelected) Color.White else Color.Transparent)
+                                                    .clickable { 
+                                                        val updated = draft.apiConfigs.toMutableList()
+                                                        updated[index] = cfg.copy(
+                                                            isVisualModel = (id == "visual"),
+                                                            isOcrModel = (id == "ocr")
+                                                        )
+                                                        draft = normalizeDefaultEngine(draft.copy(apiConfigs = updated))
+                                                    }
+                                                    .padding(vertical = 8.dp),
+                                                contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Info,
-                                                    contentDescription = "视觉模型提示",
-                                                    tint = Slate400,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(icon, fontSize = 12.sp)
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = label,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (isSelected) Emerald600 else Slate500
+                                                    )
+                                                }
                                             }
-                                            Text(
-                                                text = "多模态模型",
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Slate400
-                                            )
-                                            Switch(
-                                                checked = cfg.isVisualModel,
-                                                onCheckedChange = { checked ->
-                                                    val updated = draft.apiConfigs.toMutableList()
-                                                    updated[index] = cfg.copy(isVisualModel = checked)
-                                                    draft = normalizeDefaultEngine(draft.copy(apiConfigs = updated))
-                                                },
-                                                colors = SwitchDefaults.colors(
-                                                    checkedThumbColor = Color.White,
-                                                    checkedTrackColor = Emerald500,
-                                                    uncheckedThumbColor = Slate400,
-                                                    uncheckedTrackColor = Slate200
-                                                ),
-                                                modifier = Modifier.scale(0.8f)
-                                            )
                                         }
                                     }
 
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    
                                     Button(
                                         onClick = {
                                             scope.launch {
                                                 testingIndices = testingIndices + index
-                                                testStatusByIndex = testStatusByIndex + (index to "测试中…")
                                                 val result = runCatching {
                                                     testOnlineApiConnection(
                                                         config = draft.apiConfigs[index],
                                                         client = testClient
                                                     )
                                                 }
-                                                testStatusByIndex = testStatusByIndex + (index to result.fold(
-                                                    onSuccess = { it },
-                                                    onFailure = { "失败：${it.message ?: "未知错误"}" }
-                                                ))
+                                                result.fold(
+                                                    onSuccess = { 
+                                                        testStatusByIndex = testStatusByIndex + (index to "成功")
+                                                        testResultDialog = "连接测试成功" to it 
+                                                    },
+                                                    onFailure = { 
+                                                        testStatusByIndex = testStatusByIndex + (index to "失败")
+                                                        testResultDialog = "连接测试失败" to (it.message ?: "未知错误")
+                                                    }
+                                                )
                                                 testingIndices = testingIndices - index
                                             }
                                         },
                                         enabled = index !in testingIndices,
-                                        colors = ButtonDefaults.buttonColors(containerColor = Slate800),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.height(36.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (statusText == "成功") Emerald500 else if (statusText == "失败") Color.Red else Slate800
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.height(38.dp),
                                         contentPadding = PaddingValues(horizontal = 16.dp)
                                     ) {
-                                        Text(if (index in testingIndices) "..." else "测试连接")
+                                        if (index in testingIndices) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                        } else {
+                                            Text(if (statusText.isNotEmpty()) statusText else "测试连接", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
@@ -691,18 +703,6 @@ fun SettingsScreen(
                             modifier = Modifier.padding(24.dp),
                             verticalArrangement = Arrangement.spacedBy(20.dp)
                         ) {
-                            val activeOcrId = if (draft.ocrEngine.trim().equals("MLKit", ignoreCase = true)) "MLKit" else "PaddleOCR"
-                            SectionToggle(
-                                label = "OCR 模型",
-                                badgeText = "OCR",
-                                colorTheme = ToggleTheme.Sky,
-                                options = listOf(
-                                    ToggleOption("PaddleOCR", "PaddleOCR", "🐼"),
-                                    ToggleOption("MLKit", "ML Kit", "🔤")
-                                ),
-                                activeId = activeOcrId,
-                                onSelect = { id -> draft = draft.copy(ocrEngine = id) }
-                            )
 
                             SectionToggle(
                                 label = "文字顺序",
@@ -922,6 +922,74 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            // App Update Section
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    SectionHeader(
+                        title = "关于与更新",
+                        icon = Icons.Filled.Info,
+                        themeColor = Sky600,
+                        themeBg = Sky100
+                    )
+
+                    Card(
+                        shape = RoundedCornerShape(32.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { onCheckUpdate() }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "检查更新",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Slate700
+                                    )
+                                    if (hasNewVersion) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFFF9800))
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = if (hasNewVersion) "发现新版本" else "已是最新版",
+                                    fontSize = 14.sp,
+                                    color = if (hasNewVersion) Color(0xFFFF9800) else Slate400,
+                                    fontWeight = if (hasNewVersion) FontWeight.Bold else FontWeight.Normal
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Slate300,
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .padding(start = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     if (apiToDeleteIndex != null) {
@@ -1009,6 +1077,39 @@ fun SettingsScreen(
             },
             containerColor = Color.White,
             shape = RoundedCornerShape(28.dp)
+        )
+    }
+    if (testResultDialog != null) {
+        AlertDialog(
+            onDismissRequest = { testResultDialog = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (testResultDialog?.first?.contains("成功") == true) Icons.Default.Check else Icons.Default.Info,
+                        contentDescription = null,
+                        tint = if (testResultDialog?.first?.contains("成功") == true) Emerald500 else Color.Red,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(testResultDialog?.first ?: "", fontWeight = FontWeight.Bold, color = Slate800)
+                }
+            },
+            text = {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        testResultDialog?.second ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Slate700
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { testResultDialog = null }) {
+                    Text("确定", color = Emerald600, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(24.dp)
         )
     }
 }

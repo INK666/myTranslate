@@ -2,32 +2,24 @@ package com.example.mytransl.ui.nav
 
 import android.app.Activity
 import android.content.Intent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavHostController
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -42,6 +34,11 @@ import com.example.mytransl.ui.home.MainScreen
 import com.example.mytransl.ui.permissions.PermissionsScreen
 import com.example.mytransl.ui.settings.SettingsScreen
 import com.example.mytransl.ui.translate.TranslateScreen
+import com.example.mytransl.ui.components.UpdateDialog
+import com.example.mytransl.utils.UpdateManager
+import com.example.mytransl.data.settings.SettingsRepository
+import com.example.mytransl.data.settings.SettingsState
+import kotlinx.coroutines.launch
 
 object Routes {
     const val Home = "home"
@@ -54,11 +51,53 @@ object Routes {
 fun AppNav(
     navController: NavHostController = rememberNavController()
 ) {
+    val scope = rememberCoroutineScope()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
     val topLevelRoutes = remember {
         listOf(Routes.Home, Routes.Translate, Routes.Settings)
+    }
+
+    val context = LocalContext.current
+    val repo = remember { SettingsRepository(context) }
+    val settings by repo.settings.collectAsState(initial = SettingsState())
+    
+    // updateDialogItem: Triple(versionName, versionCode, url, changelog)
+    var updateDialogItem by remember { mutableStateOf<UpdateInfo?>(null) }
+    var hasNewVersion by remember { mutableStateOf(false) }
+
+    fun doCheckUpdate(showToastIfLatest: Boolean = false) {
+        UpdateManager.checkUpdate(context) { versionName, changelog, url, versionCode ->
+            hasNewVersion = true
+            // 只有当服务器版本号大于用户忽略的版本号时，才主动弹出强制更新弹窗
+            if (versionCode > settings.ignoredVersionCode) {
+                updateDialogItem = UpdateInfo(versionName, versionCode, url, changelog)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        doCheckUpdate()
+    }
+
+    // 弹窗逻辑
+    if (updateDialogItem != null) {
+        UpdateDialog(
+            versionName = updateDialogItem!!.versionName,
+            changelog = updateDialogItem!!.changelog.ifBlank { "暂无更新日志" },
+            onDismiss = {
+                val currentInfo = updateDialogItem!!
+                scope.launch {
+                    repo.saveSettings(settings.copy(ignoredVersionCode = currentInfo.versionCode))
+                }
+                updateDialogItem = null
+            },
+            onConfirm = {
+                UpdateManager.downloadUpdate(context, updateDialogItem!!.url)
+                updateDialogItem = null
+            }
+        )
     }
 
     Scaffold(
@@ -85,9 +124,7 @@ fun AppNav(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Routes.Home) {
-                val context = LocalContext.current
                 val running by TranslationServiceState.running.collectAsState()
-
                 MainScreen(
                     onOpenPermissions = { navController.navigate(Routes.Permissions) },
                     onStart = {
@@ -111,6 +148,13 @@ fun AppNav(
             }
             composable(Routes.Settings) {
                 SettingsScreen(
+                    hasNewVersion = hasNewVersion,
+                    onCheckUpdate = {
+                        // 手动点击检查更新时，无视“忽略此版本”的标记，强行显示弹窗
+                        UpdateManager.checkUpdate(context) { versionName, changelog, url, versionCode ->
+                            updateDialogItem = UpdateInfo(versionName, versionCode, url, changelog)
+                        }
+                    },
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -122,6 +166,13 @@ fun AppNav(
         }
     }
 }
+
+private data class UpdateInfo(
+    val versionName: String,
+    val versionCode: Int,
+    val url: String,
+    val changelog: String
+)
 
 @Composable
 private fun AppBottomBar(
@@ -148,10 +199,9 @@ private fun AppBottomBar(
                 selected = selected,
                 onClick = { onNavigate(route) },
                 icon = {
-                    // 自定义布局：图标和文字一起包裹在指示器中
-                    androidx.compose.foundation.layout.Column(
+                    Column(
                         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                        verticalArrangement = Arrangement.Center,
                         modifier = Modifier.padding(vertical = 8.dp)
                     ) {
                         Icon(
@@ -160,7 +210,7 @@ private fun AppBottomBar(
                             tint = if (selected) Color(0xFF10B981) else Color(0xFF94A3B8),
                             modifier = Modifier.size(24.dp)
                         )
-                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = label,
                             style = MaterialTheme.typography.labelMedium,
@@ -169,9 +219,9 @@ private fun AppBottomBar(
                         )
                     }
                 },
-                label = null, // 不使用默认的 label，因为已经在 icon 中自定义了
+                label = null,
                 alwaysShowLabel = true,
-                colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = Color(0xFF10B981),
                     selectedTextColor = Color(0xFF10B981),
                     unselectedIconColor = Color(0xFF94A3B8),

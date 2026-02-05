@@ -82,6 +82,99 @@ class TranslationEngineManager(
             sourceLanguage = sourceLanguage,
             targetLanguage = targetLanguage,
             settings = settings
-        ) ?: normalizedText
+        ) ?: ""
+    }
+
+    suspend fun translateBatch(
+        texts: List<String>,
+        sourceLanguage: String?,
+        targetLanguage: String,
+        settings: SettingsState
+    ): List<String> {
+        val normalizedTexts = texts.map { it.trim() }
+        if (normalizedTexts.isEmpty()) return emptyList()
+
+        val engineId = settings.defaultEngine
+        val engine = enginesById[engineId] ?: return normalizedTexts
+
+        val results = MutableList(normalizedTexts.size) { "" }
+        val indicesToTranslate = mutableListOf<Int>()
+        val textsToTranslate = mutableListOf<String>()
+
+        normalizedTexts.forEachIndexed { index, text ->
+            if (text.isEmpty()) {
+                results[index] = ""
+                return@forEachIndexed
+            }
+
+            val cacheKey = if (settings.cacheEnabled) {
+                buildString {
+                    append(engineId)
+                    append(":")
+                    append(sourceLanguage ?: "auto")
+                    append("->")
+                    append(targetLanguage)
+                    append(":")
+                    append(text)
+                }
+            } else null
+
+            val cached = if (cacheKey != null) cache.get(cacheKey) else null
+            if (cached != null) {
+                results[index] = cached
+            } else {
+                indicesToTranslate.add(index)
+                textsToTranslate.add(text)
+            }
+        }
+
+        if (indicesToTranslate.isEmpty()) {
+            return results
+        }
+
+        try {
+            val translatedBatch = engine.translateBatch(
+                textsToTranslate,
+                sourceLanguage,
+                targetLanguage,
+                settings
+            )
+
+            translatedBatch.forEachIndexed { i, translated ->
+                val originalIndex = indicesToTranslate[i]
+                val originalText = textsToTranslate[i]
+                
+                val cleanResult = translated.trim()
+                val isValid = cleanResult.isNotEmpty() && 
+                              cleanResult != originalText && 
+                              !cleanResult.startsWith("[")
+                
+                val finalResult = if (isValid) cleanResult else ""
+                
+                results[originalIndex] = finalResult
+
+                if (isValid && settings.cacheEnabled) {
+                    val cacheKey = buildString {
+                        append(engineId)
+                        append(":")
+                        append(sourceLanguage ?: "auto")
+                        append("->")
+                        append(targetLanguage)
+                        append(":")
+                        append(originalText)
+                    }
+                    cache.put(cacheKey, finalResult)
+                }
+            }
+        } catch (e: Throwable) {
+            onValidationFailed?.invoke(e.message ?: "批量翻译失败")
+            indicesToTranslate.forEachIndexed { i, originalIndex ->
+                if (results[originalIndex].isEmpty()) {
+                    results[originalIndex] = ""
+                }
+            }
+        }
+
+        return results
     }
 }

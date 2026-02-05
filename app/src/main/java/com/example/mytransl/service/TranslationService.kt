@@ -22,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import com.example.mytransl.R
 import com.example.mytransl.data.ocr.PaddleOcrEngine
 import com.example.mytransl.data.ocr.MlKitOcrEngine
+import com.example.mytransl.data.ocr.OnlineOcrEngine
 import com.example.mytransl.data.settings.SettingsRepository
 import com.example.mytransl.data.settings.ApiConfig
 import com.example.mytransl.data.settings.SettingsState
@@ -191,6 +192,18 @@ class TranslationService : Service() {
         current: PreferredLanguageAwareOcrEngine
     ): PreferredLanguageAwareOcrEngine {
         val id = state.ocrEngine.trim()
+        
+        // Check for Custom Online OCR
+        val apiConfig = state.apiConfigs.find { it.name == id && it.isOcrModel }
+        if (apiConfig != null) {
+            // If current is already an OnlineOcrEngine for this config, keep it
+            // Simple check: strict implementation would require checking config equality
+            if (current is OnlineOcrEngine) {
+                 return current // Optimistic reuse, or recreate to be safe if config changed
+            }
+            return OnlineOcrEngine(apiConfig)
+        }
+
         val usePaddle = id.isBlank() || id.equals("PaddleOCR", ignoreCase = true)
         return if (usePaddle) {
             if (current is PaddleOcrEngine) current else PaddleOcrEngine()
@@ -269,7 +282,7 @@ class TranslationService : Service() {
                     }
                 }
             }
-            if (currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)) {
+            if (currentSettings.resultMode == "独立窗口") {
                 overlay.showTextOverlay()
                 overlay.hideContentOverlay()
             } else {
@@ -381,7 +394,7 @@ class TranslationService : Service() {
                             // 用户需要手动点击暂停/开始按钮来恢复翻译
                         }
                         // Trigger immediate visibility update for the overlay
-                        if (currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)) {
+                        if (currentSettings.resultMode == "独立窗口") {
                             overlay.setTextOverlayVisible(showingText)
                         } else {
                             overlay.setContentOverlayVisible(showingText)
@@ -493,7 +506,7 @@ class TranslationService : Service() {
 
         fun toggleOverlayVisibility() {
             showingText = !showingText
-            if (currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)) {
+            if (currentSettings.resultMode == "独立窗口") {
                 overlay.setTextOverlayVisible(showingText)
             } else {
                 overlay.setContentOverlayVisible(showingText)
@@ -531,7 +544,7 @@ class TranslationService : Service() {
                     if (!showingText) {
                         showingText = true
                         overlay.updateAutoVisibility(showingText)
-                        if (currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)) {
+                        if (currentSettings.resultMode == "独立窗口") {
                             overlay.setTextOverlayVisible(showingText)
                         } else {
                             overlay.setContentOverlayVisible(showingText)
@@ -771,17 +784,9 @@ class TranslationService : Service() {
             
             try {
                 val source = settings.sourceLanguage.takeIf { it != "自动检测" }
-                val translated = if (sameLang) text else {
-                    val res = engineManager.translateStrict(text, source, settings.targetLanguage, settings)
-                    if (res == null) {
-                        // Callback already handled the popup
-                        text
-                    } else {
-                        res
-                    }
-                }
 
-                // VALIDATION CHECK
+                // VALIDATION CHECK FIRST
+                // Check if screen changed before performing expensive translation
                 if (validationHash != null) {
                     val checkBmp = runCatching { capturer.capture() }.getOrNull()
                     if (checkBmp != null) {
@@ -796,6 +801,15 @@ class TranslationService : Service() {
                 }
 
                 if (settings.resultMode == "独立窗口") {
+                    val translated = if (sameLang) text else {
+                        val res = engineManager.translateStrict(text, source, settings.targetLanguage, settings)
+                        if (res == null) {
+                            text
+                        } else {
+                            res
+                        }
+                    }
+                    
                     lastOverlayUpdateAtMs = SystemClock.elapsedRealtime()
                     runCatching { overlay.updateTextOverlay(translated) }
                     runCatching { overlay.setTextOverlayVisible(true) }
@@ -805,8 +819,29 @@ class TranslationService : Service() {
                 } else {
                     val targetW = realScreenWidth
                     val targetH = realScreenHeight
-                    // Stop subtracting offsets here. OverlayController will handle it during draw.
-                    val items = buildContentOverlayItems(blocks, source, settings.targetLanguage, sameLang, settings, targetW, targetH, bitmap.width, bitmap.height, 0, 0)
+                    
+                    // 覆盖模式优化：先进行批量翻译，再生成 OverlayItem
+                    // 只有当语言不同时才需要翻译
+                    val finalBlocks = if (sameLang) {
+                        sortedBlocks
+                    } else {
+                        val textsToTranslate = sortedBlocks.map { it.text }
+                        // 调用批量翻译接口
+                        val translatedTexts = engineManager.translateBatch(
+                            textsToTranslate, 
+                            source, 
+                            settings.targetLanguage, 
+                            settings
+                        )
+                        // 将译文回填到 TextBlock
+                        // 如果译文为空（说明被合并或翻译失败），则丢弃该块，避免显示原文
+                        sortedBlocks.zip(translatedTexts).mapNotNull { (block, trans) ->
+                            if (trans.isNotEmpty()) block.copy(text = trans) else null
+                        }
+                    }
+
+                    // 传入 sameLang=true，强制 buildContentOverlayItems 直接使用 block 内的文本（已是译文）
+                    val items = buildContentOverlayItems(finalBlocks, source, settings.targetLanguage, true, settings, targetW, targetH, bitmap.width, bitmap.height, 0, 0)
                     
                     lastOverlayUpdateAtMs = SystemClock.elapsedRealtime()
                     runCatching { overlay.setContentOverlaySelectedRect(selectedRect) }
@@ -861,9 +896,69 @@ class TranslationService : Service() {
         // 设置悬浮球为加载状态（橙色）
         runCatching { overlay.setFloatingBallLoading(true) }
         
-        val translated = try {
-            OnlineApiEngine(config, visualClient)
-                .translateImage(visualBitmap, source, settings.targetLanguage, settings)
+        try {
+            val engine = OnlineApiEngine(config, visualClient)
+            
+            if (settings.resultMode == "独立窗口") {
+                val translated = engine.translateImage(visualBitmap, source, settings.targetLanguage, settings)
+                
+                // VALIDATION CHECK
+                if (validationHash != null) {
+                    val checkBmp = runCatching { capturer.capture() }.getOrNull()
+                    if (checkBmp != null) {
+                        val currentHash = calculateImageHash(checkBmp)
+                        ResourceManager.recycleBitmap(checkBmp)
+                        if (calculateDifference(validationHash, currentHash) > 0.04f) {
+                            requestOcrDebounced()
+                            return
+                        }
+                    }
+                }
+
+                lastOverlayUpdateAtMs = SystemClock.elapsedRealtime()
+                runCatching { overlay.updateTextOverlay(translated) }
+                runCatching { overlay.setTextOverlayVisible(true) }
+                runCatching { overlay.setContentOverlaySelectedRect(selectedRect) }
+                runCatching { overlay.updateContentOverlay(emptyList()) }
+                runCatching { overlay.setContentOverlayVisible(selectedRect != null) }
+            } else {
+                val blocks = engine.recognizeAndTranslate(visualBitmap, source, settings.targetLanguage, settings)
+                
+                // VALIDATION CHECK
+                if (validationHash != null) {
+                    val checkBmp = runCatching { capturer.capture() }.getOrNull()
+                    if (checkBmp != null) {
+                        val currentHash = calculateImageHash(checkBmp)
+                        ResourceManager.recycleBitmap(checkBmp)
+                        if (calculateDifference(validationHash, currentHash) > 0.04f) {
+                            requestOcrDebounced()
+                            return
+                        }
+                    }
+                }
+
+                val cropLeft = if (region != null) region.left.toInt().coerceIn(0, bitmap.width - 1) else 0
+                val cropTop = if (region != null) region.top.toInt().coerceIn(0, bitmap.height - 1) else 0
+
+                val adjustedBlocks = blocks.map { b ->
+                    val r = RectF(b.bounds)
+                    if (cropLeft != 0 || cropTop != 0) {
+                        r.offset(cropLeft.toFloat(), cropTop.toFloat())
+                    }
+                    b.copy(bounds = r)
+                }
+
+                val targetW = realScreenWidth
+                val targetH = realScreenHeight
+                // 强制 sameLang=true，直接显示译文
+                val items = buildContentOverlayItems(adjustedBlocks, source, settings.targetLanguage, true, settings, targetW, targetH, bitmap.width, bitmap.height, 0, 0)
+
+                lastOverlayUpdateAtMs = SystemClock.elapsedRealtime()
+                runCatching { overlay.setContentOverlaySelectedRect(selectedRect) }
+                runCatching { overlay.updateContentOverlay(items) }
+                runCatching { overlay.setContentOverlayVisible(true) }
+                runCatching { overlay.setTextOverlayVisible(false) }
+            }
         } finally {
             // 翻译完成后恢复悬浮球状态
             runCatching { overlay.setFloatingBallLoading(false) }
@@ -871,25 +966,6 @@ class TranslationService : Service() {
                 ResourceManager.recycleBitmap(visualBitmap)
             }
         }
-
-        if (validationHash != null) {
-            val checkBmp = runCatching { capturer.capture() }.getOrNull()
-            if (checkBmp != null) {
-                val currentHash = calculateImageHash(checkBmp)
-                ResourceManager.recycleBitmap(checkBmp)
-                if (calculateDifference(validationHash, currentHash) > 0.04f) {
-                    requestOcrDebounced()
-                    return
-                }
-            }
-        }
-
-        lastOverlayUpdateAtMs = SystemClock.elapsedRealtime()
-        runCatching { overlay.showTextOverlay() }
-        runCatching { overlay.updateTextOverlay(translated) }
-        runCatching { overlay.setTextOverlayVisible(showingText) }
-        runCatching { overlay.updateContentOverlay(emptyList()) }
-        runCatching { overlay.setContentOverlayVisible(false) }
     }
 
     private fun sortBlocksForManga(blocks: List<TextBlock>): List<TextBlock> {
@@ -1007,7 +1083,7 @@ class TranslationService : Service() {
                 if (!isActive || stopped) return@withLock
                 
                 val isLocal = currentSettings.translationMode.contains("区域")
-                val isIndependent = currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)
+                val isIndependent = currentSettings.resultMode == "独立窗口"
                 val fastTrack = isSubtitle && isLocal && isIndependent && !isOverlayOverlapping()
 
                 // Only capture validation fingerprint if we NEED to flicker (hide/show)
@@ -1034,7 +1110,7 @@ class TranslationService : Service() {
         val isSingle = currentSettings.translationMode.startsWith("单次")
         val isSubtitle = currentSettings.autoSpeedMode == "字幕"
         val isLocal = currentSettings.translationMode.contains("区域")
-        val isIndependent = currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)
+        val isIndependent = currentSettings.resultMode == "独立窗口"
         
         // 手动+积极追赶（字幕）：强制隐藏以确保截图清晰，响应用户“立即隐藏”的需求
         val isManualRabbit = isSingle && isSubtitle
@@ -1066,7 +1142,7 @@ class TranslationService : Service() {
     private suspend fun captureFrameForAutoOcr(): Bitmap? {
         val isSubtitle = currentSettings.autoSpeedMode == "字幕"
         val isLocal = currentSettings.translationMode.contains("区域")
-        val isIndependent = currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)
+        val isIndependent = currentSettings.resultMode == "独立窗口"
         
         val needsFlicker = !isSubtitle || !isLocal || !isIndependent || isOverlayOverlapping()
 
@@ -1127,13 +1203,13 @@ class TranslationService : Service() {
             lastOcrText = ""
             val bitmap = captureCleanFrame()
             if (bitmap == null) {
-            if (currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)) {
+            if (currentSettings.resultMode == "独立窗口") {
                     runCatching { overlay.showTextOverlay() }
                     runCatching { overlay.updateTextOverlay("未截取到画面") }
                 }
                 return
             }
-            if (currentSettings.resultMode == "独立窗口" || isVisualEngineActive(currentSettings)) {
+            if (currentSettings.resultMode == "独立窗口") {
                 runCatching { overlay.showTextOverlay() }
                 // 如果是手动+积极追赶模式，不要用“翻译中”覆盖旧译文
                 val isSubtitle = currentSettings.autoSpeedMode == "字幕"

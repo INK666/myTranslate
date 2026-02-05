@@ -234,6 +234,25 @@ class OverlayController(
             }
         }
 
+        val copy = TextView(context).apply {
+            text = "⎘"
+            setTextColor("#E2E8F0".toColorInt())
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setOnClickListener {
+                // 复制文本到剪贴板
+                val text = textView?.text?.toString() ?: ""
+                if (text.isNotEmpty()) {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("翻译结果", text)
+                    clipboard?.setPrimaryClip(clip)
+                    // 可以添加一个简短的提示
+                    android.widget.Toast.makeText(context, "已复制", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            setPadding(dp(8f), 0, dp(8f), 0)
+        }
+
         val close = TextView(context).apply {
             text = "✕"
             setTextColor("#E2E8F0".toColorInt())
@@ -247,6 +266,13 @@ class OverlayController(
             setPadding(dp(8f), 0, dp(10f), 0)
         }
 
+        val buttonContainer = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(copy)
+            addView(close)
+        }
+
         val handleLayout = FrameLayout(context).apply {
             background = GradientDrawable().apply {
                 setColor("#E61E293B".toColorInt())
@@ -257,7 +283,7 @@ class OverlayController(
             addView(handleIndicator, FrameLayout.LayoutParams(handleWidth, handleHeight).apply {
                 gravity = Gravity.CENTER
             })
-            addView(close, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.MATCH_PARENT).apply {
+            addView(buttonContainer, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.MATCH_PARENT).apply {
                 gravity = Gravity.END
             })
         }
@@ -991,32 +1017,50 @@ private class ContentOverlayView(
 
             } else {
                 // --- Horizontal / Adaptive Logic ---
-                // 设置最小框体宽度，确保文字可读
-                val minBoxWidth = sp(12f)  // 最小框体宽度，约能显示 1 个中文字符
+                val screenW = resources.displayMetrics.widthPixels
+                val minBoxWidth = sp(12f)
                 
                 val originalAvailW = (right - left - 2 * innerHPad).toInt().coerceAtLeast(1)
                 val availH = (bottom - top - 2 * innerVPad).coerceAtLeast(1f)
                 
-                // 智能字号：取宽高较小值作为基准，确保文字能放入框内
-                val minDim = if (originalAvailW.toFloat() < availH) originalAvailW.toFloat() else availH
-                val baseSize = (minDim * 0.80f).coerceIn(sp(10f), sp(22f))
+                // Smart Font Size
+                // If text is long (e.g. paragraph from multimodal), use standard reading size.
+                // If short (titling/label), scale to fit box but cap reasonably.
+                val isLongText = item.text.length > 30
+                val baseSize = if (isLongText) {
+                    sp(14f) // Comfortable reading size for paragraphs
+                } else {
+                    val minDim = if (originalAvailW.toFloat() < availH) originalAvailW.toFloat() else availH
+                    (minDim * 0.80f).coerceIn(sp(12f), sp(22f))
+                }
                 textPaint.textSize = baseSize
 
-                // 基于原始 OCR 宽度计算最大扩展倍数（限制为 1.8 倍，减少遮挡）
+                // Smart Expansion Logic
                 val textWidth = textPaint.measureText(item.text)
-                val maxExpandedW = (originalAvailW * 1.8f).toInt()
+                // If box already takes up >70% of screen, do not expand further.
+                val isAlreadyWide = originalAvailW > screenW * 0.70f
+                
+                // Only allow expansion if text is short AND box is not already wide
+                val maxExpandedW = if (isAlreadyWide || isLongText) {
+                     originalAvailW.toFloat() // Strict confinement for paragraphs/wide banners
+                } else {
+                     originalAvailW * 1.5f // Moderate expansion for small timestamp/label bugs
+                }
                 
                 val minTextW = sp(11f).toInt()
                 val targetW = kotlin.math.ceil(textWidth).toInt().coerceAtLeast(minTextW)
                 
-                // 计算实际需要的布局宽度
-                val layoutW = if (targetW > originalAvailW) {
-                    kotlin.math.min(targetW, maxExpandedW)
+                // Calculate final layout width
+                var layoutW = if (targetW > originalAvailW) {
+                    kotlin.math.min(targetW.toFloat(), maxExpandedW).toInt()
                 } else {
                     originalAvailW
                 }
                 
-                // 应用最小宽度限制（确保框体至少有 minBoxWidth 宽）
+                // Hard safety cap: ensure it never exceeds screen width (minus padding)
+                layoutW = layoutW.coerceAtMost((screenW * 0.95f).toInt())
+                
+                // Lower bound safety
                 val finalLayoutW = layoutW.coerceAtLeast(minBoxWidth.toInt())
 
                 val layout = StaticLayout.Builder

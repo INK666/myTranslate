@@ -105,7 +105,7 @@ fun TranslateScreen() {
     var isTranslating by remember { mutableStateOf(false) }
     
     // Modes
-    val modes = listOf("文本翻译", "兽音加解密", "Base64 编解码", "图像识别")
+    val modes = listOf("文本翻译", "图像识别", "兽音加解密", "Base64 编解码")
     var currentMode by rememberSaveable { mutableStateOf("文本翻译") }
 
     // Image Recognition State
@@ -183,11 +183,17 @@ fun TranslateScreen() {
     
     // Engine selection
     var selectedEngineId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedOcrId by rememberSaveable { mutableStateOf<String?>(null) }
     
     // Initialize selected engine from settings once
     LaunchedEffect(settings.defaultEngine) {
         if (selectedEngineId == null) {
             selectedEngineId = settings.defaultEngine
+        }
+    }
+    LaunchedEffect(settings.ocrEngine) {
+        if (selectedOcrId == null) {
+            selectedOcrId = settings.ocrEngine
         }
     }
 
@@ -262,7 +268,8 @@ fun TranslateScreen() {
                              settings = settings
                          )
                      } else {
-                         val ocr = buildOcrEngine(settings.ocrEngine)
+                         val ocrId = selectedOcrId ?: settings.ocrEngine
+                         val ocr = buildOcrEngine(ocrId, settings)
                          ocr.preferredLanguage = sourceLang.takeIf { it != "自动检测" }
                          val blocks = ocr.recognize(bitmap)
                          val orderedBlocks = if (settings.isMangaMode) sortBlocksForManga(blocks) else blocks
@@ -352,17 +359,34 @@ fun TranslateScreen() {
                     } else {
                         languages
                     }
-                    TranslationControls(
-                        sourceLang = sourceLang,
-                        targetLang = targetLang,
-                        languages = sourceOptions,
-                        selectedEngineId = selectedEngineId,
-                        settings = settings,
-                        onSourceChange = { sourceLang = it },
-                        onTargetChange = { targetLang = it },
-                        onSwap = { swapLanguages() },
-                        onEngineChange = { selectedEngineId = it }
-                    )
+                     TranslationControls(
+                         sourceLang = sourceLang,
+                         targetLang = targetLang,
+                         languages = sourceOptions,
+                         selectedEngineId = selectedEngineId,
+                         selectedOcrId = selectedOcrId,
+                         currentMode = currentMode,
+                         settings = settings,
+                         onSourceChange = { sourceLang = it },
+                         onTargetChange = { targetLang = it },
+                         onSwap = { swapLanguages() },
+                         onEngineChange = { id ->
+                             selectedEngineId = id
+                             // Linkage: if visual model is selected as translator, use it as OCR too
+                             val config = settings.apiConfigs.find { it.name == id }
+                             if (config?.isVisualModel == true) {
+                                 selectedOcrId = id
+                             }
+                         },
+                         onOcrChange = { id ->
+                             selectedOcrId = id
+                             // Linkage: if visual model is selected as OCR, use it as translator too
+                             val config = settings.apiConfigs.find { it.name == id }
+                             if (config?.isVisualModel == true) {
+                                 selectedEngineId = id
+                             }
+                         }
+                     )
                 }
             }
             
@@ -453,8 +477,13 @@ private fun copyImageToCache(context: Context, uri: Uri): File? {
     }.getOrNull()
 }
 
-private fun buildOcrEngine(ocrId: String): PreferredLanguageAwareOcrEngine {
-    val usePaddle = ocrId.isBlank() || ocrId.equals("PaddleOCR", ignoreCase = true)
+private fun buildOcrEngine(ocrId: String, settings: SettingsState): PreferredLanguageAwareOcrEngine {
+    val id = ocrId.trim()
+    val apiConfig = settings.apiConfigs.find { it.name == id && (it.isOcrModel || it.isVisualModel) }
+    if (apiConfig != null) {
+        return com.example.mytransl.data.ocr.OnlineOcrEngine(apiConfig)
+    }
+    val usePaddle = id.isBlank() || id.equals("PaddleOCR", ignoreCase = true)
     return if (usePaddle) PaddleOcrEngine() else MlKitOcrEngine()
 }
 
@@ -671,11 +700,14 @@ fun TranslationControls(
     targetLang: String,
     languages: List<String>,
     selectedEngineId: String?,
+    selectedOcrId: String?,
+    currentMode: String,
     settings: SettingsState,
     onSourceChange: (String) -> Unit,
     onTargetChange: (String) -> Unit,
     onSwap: () -> Unit,
-    onEngineChange: (String) -> Unit
+    onEngineChange: (String) -> Unit,
+    onOcrChange: (String) -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = SurfaceColor),
@@ -684,7 +716,89 @@ fun TranslationControls(
         modifier = Modifier.border(1.dp, BorderColor, RoundedCornerShape(20.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Engine Selector
+            // OCR Selector row (ONLY in Image Recognition mode) - MOVED TO TOP
+            if (currentMode == "图像识别") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically, 
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Visibility,
+                        contentDescription = null,
+                        tint = PrimaryColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("OCR 模型", fontSize = 14.sp, color = TextSecondary, fontWeight = FontWeight.SemiBold)
+                    
+                    Spacer(modifier = Modifier.width(12.dp))
+                    
+                    var expandedOcr by remember { mutableStateOf(false) }
+                    val ocrList = buildList {
+                        add("PaddleOCR")
+                        // MLKit removed from UI to avoid confusion
+                        addAll(settings.apiConfigs.filter { it.isOcrModel || it.isVisualModel }.map { it.name })
+                    }.distinct()
+                    
+                    Box(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(BackgroundColor)
+                                .clickable { expandedOcr = true }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val cfgOcr = settings.apiConfigs.find { it.name == selectedOcrId }
+                                if (cfgOcr?.isVisualModel == true) {
+                                    Text("📖", fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
+                                } else if (cfgOcr?.isOcrModel == true) {
+                                    Text("👁️", fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
+                                }
+                                Text(
+                                    text = if (selectedOcrId == "MLKit") "ML Kit" else selectedOcrId ?: "PaddleOCR",
+                                    color = TextPrimary,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
+                            Icon(Icons.Default.ArrowDropDown, null, tint = TextSecondary)
+                        }
+                        DropdownMenu(
+                            expanded = expandedOcr, 
+                            onDismissRequest = { expandedOcr = false },
+                            modifier = Modifier.background(SurfaceColor)
+                        ) {
+                            ocrList.forEach { name ->
+                                DropdownMenuItem(
+                                    text = { 
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            val cfg = settings.apiConfigs.find { it.name == name }
+                                            if (cfg?.isVisualModel == true) {
+                                                Text("📖", fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
+                                            } else if (cfg?.isOcrModel == true) {
+                                                Text("👁️", fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
+                                            }
+                                            Text(if (name == "MLKit") "ML Kit" else name)
+                                        }
+                                    },
+                                    onClick = {
+                                        onOcrChange(name)
+                                        expandedOcr = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // Engine Selector row
             Row(
                 verticalAlignment = Alignment.CenterVertically, 
                 modifier = Modifier.fillMaxWidth()
@@ -705,7 +819,8 @@ fun TranslationControls(
                     add("微软离线")
                     add("谷歌翻译（免费）")
                     add("Bing翻译（免费）")
-                    addAll(settings.apiConfigs.map { it.name })
+                    // EXCLUDE Pure OCR models from translation engine list
+                    addAll(settings.apiConfigs.filter { !it.isOcrModel }.map { it.name })
                 }.distinct()
                 
                 Box(modifier = Modifier.weight(1f)) {
@@ -720,14 +835,9 @@ fun TranslationControls(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            val isVisual = settings.apiConfigs.find { it.name == selectedEngineId }?.isVisualModel == true
-                            if (isVisual) {
-                                Icon(
-                                    imageVector = Icons.Default.Visibility,
-                                    contentDescription = "Visual Model",
-                                    tint = PrimaryColor,
-                                    modifier = Modifier.size(16.dp).padding(end = 4.dp)
-                                )
+                            val cfg = settings.apiConfigs.find { it.name == selectedEngineId }
+                            if (cfg?.isVisualModel == true) {
+                                Text("📖", fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
                             }
                             Text(
                                 text = if (selectedEngineId == "微软离线") "ML Kit (离线)" else selectedEngineId ?: "选择引擎",
@@ -748,14 +858,9 @@ fun TranslationControls(
                             DropdownMenuItem(
                                 text = { 
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        val isVisual = settings.apiConfigs.find { it.name == name }?.isVisualModel == true
-                                        if (isVisual) {
-                                            Icon(
-                                                imageVector = Icons.Default.Visibility,
-                                                contentDescription = "Visual Model",
-                                                tint = PrimaryColor,
-                                                modifier = Modifier.size(16.dp).padding(end = 4.dp)
-                                            )
+                                        val cfg = settings.apiConfigs.find { it.name == name }
+                                        if (cfg?.isVisualModel == true) {
+                                            Text("📖", fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
                                         }
                                         Text(if (name == "微软离线") "ML Kit (离线)" else name)
                                     }

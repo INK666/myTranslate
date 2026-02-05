@@ -5,16 +5,14 @@ plugins {
 
 android {
     namespace = "com.example.mytransl"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.mytransl"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.4"
+        versionCode = 106000
+        versionName = "1.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -34,6 +32,17 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            if (output is com.android.build.api.variant.impl.VariantOutputImpl) {
+                output.outputFileName.set("myTranslate_v${android.defaultConfig.versionName}.apk")
+            }
+        }
     }
 }
 

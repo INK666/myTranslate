@@ -10,4 +10,15 @@ interface TranslationEngine {
         targetLanguage: String,
         settings: SettingsState
     ): String
+
+    suspend fun translateBatch(
+        batch: List<String>,
+        sourceLanguage: String?,
+        targetLanguage: String,
+        settings: SettingsState
+    ): List<String> {
+        return batch.map { text ->
+            translate(text, sourceLanguage, targetLanguage, settings)
+        }
+    }
 }
