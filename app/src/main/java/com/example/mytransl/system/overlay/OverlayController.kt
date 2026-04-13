@@ -69,6 +69,16 @@ class OverlayController(
     private var autoControlButton: TextView? = null
     private var autoVisibilityButton: TextView? = null
     private var currentSelectedRect: android.graphics.RectF? = null
+    
+    // 用户自定义覆盖层字体大小
+    @Volatile
+    private var overlayTextSize: Int = 10
+    
+    /** 更新覆盖层字体大小 */
+    fun setOverlayTextSize(sizeSp: Int) {
+        overlayTextSize = sizeSp.coerceIn(10, 30)
+        contentView?.userTextSizeSp = overlayTextSize
+    }
 
     private fun overlayWindowType(): Int {
         return if (Build.VERSION.SDK_INT >= 26) {
@@ -611,7 +621,7 @@ class OverlayController(
         } else {
             // Keep it visible or handle sub-view visibility
             if (autoControlView == null && items.isNotEmpty()) {
-                showContentClose()
+                // showContentClose() // 已隐藏右上角关闭按钮
             }
         }
     }
@@ -643,7 +653,7 @@ class OverlayController(
         } else if (contentView != null) {
             // Avoid showing the separate Close button if AutoControl (the pill) is active
             if (autoControlView == null) {
-                showContentClose()
+                // showContentClose() // 已隐藏右上角关闭按钮
             } else {
                 hideContentClose()
             }
@@ -662,6 +672,7 @@ class OverlayController(
         if (contentContainer != null) return
 
         val overlayView = ContentOverlayView(context).apply {
+            userTextSizeSp = overlayTextSize
             setSelectedRect(currentSelectedRect)
         }
         val container = FrameLayout(context).apply {
@@ -871,6 +882,10 @@ class OverlayController(
 private class ContentOverlayView(
     context: Context
 ) : View(context) {
+    // 用户自定义字体大小 (sp)
+    @Volatile
+    var userTextSizeSp: Int = 10
+    
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = "#B312141B".toColorInt()
@@ -965,12 +980,11 @@ private class ContentOverlayView(
                 }
                 val vText = sb.toString()
                 
-                // Size based on width (column width)
-                val baseSize = (availW.toFloat() * 0.80f).coerceIn(sp(10f), sp(22f))
-                textPaint.textSize = baseSize
+                // 使用用户设置的字体大小
+                textPaint.textSize = sp(userTextSizeSp.toFloat())
 
                 val layout = StaticLayout.Builder
-                    .obtain(vText, 0, vText.length, textPaint, maxOf(availW, baseSize.toInt() + 10))
+                    .obtain(vText, 0, vText.length, textPaint, maxOf(availW, textPaint.textSize.toInt() + 10))
                     .setAlignment(Layout.Alignment.ALIGN_CENTER)
                     .setIncludePad(false)
                     .setLineSpacing(0f, 1f)
@@ -1023,22 +1037,14 @@ private class ContentOverlayView(
                 val originalAvailW = (right - left - 2 * innerHPad).toInt().coerceAtLeast(1)
                 val availH = (bottom - top - 2 * innerVPad).coerceAtLeast(1f)
                 
-                // Smart Font Size
-                // If text is long (e.g. paragraph from multimodal), use standard reading size.
-                // If short (titling/label), scale to fit box but cap reasonably.
-                val isLongText = item.text.length > 30
-                val baseSize = if (isLongText) {
-                    sp(14f) // Comfortable reading size for paragraphs
-                } else {
-                    val minDim = if (originalAvailW.toFloat() < availH) originalAvailW.toFloat() else availH
-                    (minDim * 0.80f).coerceIn(sp(12f), sp(22f))
-                }
-                textPaint.textSize = baseSize
+                // 使用用户设置的字体大小
+                textPaint.textSize = sp(userTextSizeSp.toFloat())
 
                 // Smart Expansion Logic
                 val textWidth = textPaint.measureText(item.text)
                 // If box already takes up >70% of screen, do not expand further.
                 val isAlreadyWide = originalAvailW > screenW * 0.70f
+                val isLongText = item.text.length > 30
                 
                 // Only allow expansion if text is short AND box is not already wide
                 val maxExpandedW = if (isAlreadyWide || isLongText) {

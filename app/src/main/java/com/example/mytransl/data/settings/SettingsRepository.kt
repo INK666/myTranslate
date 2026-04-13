@@ -41,7 +41,8 @@ data class SettingsState(
     val autoSpeedMode: String = "字幕", // "正常" or "字幕"
     val beastChars: String = "嗷呜啊~",
     val isMangaMode: Boolean = false,
-    val ignoredVersionCode: Int = 0
+    val ignoredVersionCode: Int = 0,
+    val overlayTextSize: Int = 10 // 覆盖层字体大小 (10-30sp)
 )
 
 class SettingsRepository(
@@ -62,6 +63,7 @@ class SettingsRepository(
         val BeastChars = stringPreferencesKey("beast_chars")
         val IsMangaMode = booleanPreferencesKey("is_manga_mode")
         val IgnoredVersionCode = intPreferencesKey("ignored_version_code")
+        val OverlayTextSize = intPreferencesKey("overlay_text_size")
     }
 
     val settings: Flow<SettingsState> = context.settingsDataStore.data.map { prefs ->
@@ -91,7 +93,8 @@ class SettingsRepository(
             autoSpeedMode = prefs[Keys.AutoSpeedMode] ?: SettingsState().autoSpeedMode,
             beastChars = prefs[Keys.BeastChars] ?: SettingsState().beastChars,
             isMangaMode = prefs[Keys.IsMangaMode] ?: SettingsState().isMangaMode,
-            ignoredVersionCode = prefs[Keys.IgnoredVersionCode] ?: SettingsState().ignoredVersionCode
+            ignoredVersionCode = prefs[Keys.IgnoredVersionCode] ?: SettingsState().ignoredVersionCode,
+            overlayTextSize = (prefs[Keys.OverlayTextSize] ?: SettingsState().overlayTextSize).coerceIn(10, 30)
         )
     }
 
@@ -111,6 +114,7 @@ class SettingsRepository(
             prefs[Keys.BeastChars] = state.beastChars
             prefs[Keys.IsMangaMode] = state.isMangaMode
             prefs[Keys.IgnoredVersionCode] = state.ignoredVersionCode
+            prefs[Keys.OverlayTextSize] = state.overlayTextSize.coerceIn(10, 30)
         }
     }
 }

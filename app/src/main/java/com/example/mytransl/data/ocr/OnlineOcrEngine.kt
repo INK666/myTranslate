@@ -28,6 +28,11 @@ class OnlineOcrEngine(
     override var preferredLanguage: String? = null
 
     override suspend fun recognize(bitmap: Bitmap): List<TextBlock> = withContext(Dispatchers.IO) {
+        android.util.Log.d("OnlineOcrEngine", "🚀🚀🚀 OnlineOcrEngine.recognize() 被调用!")
+        android.util.Log.d("OnlineOcrEngine", "   config.name = \"${config.name}\"")
+        android.util.Log.d("OnlineOcrEngine", "   config.baseUrl = \"${config.baseUrl}\"")
+        android.util.Log.d("OnlineOcrEngine", "   config.model = \"${config.model}\"")
+        
         val resolvedUrl = resolveApiUrl(config.baseUrl)
         if (resolvedUrl.isEmpty()) {
             // If URL is empty, we can't do anything. Return empty list.
@@ -36,13 +41,23 @@ class OnlineOcrEngine(
 
         val model = config.model.trim().ifEmpty { config.name }
         
+        android.util.Log.d("OnlineOcrEngine", "   resolvedUrl = \"$resolvedUrl\"")
+        android.util.Log.d("OnlineOcrEngine", "   最终 model = \"$model\"")
+        
         // Construct the prompt for Pure OCR
-        // User may provide a custom prompt in config.prompt. If not, use a default one.
         val customPrompt = config.prompt.trim().takeIf { it.isNotEmpty() }
-        val systemPrompt = "You are a pure OCR engine. Output ONLY the text found in the image. Do not translate. Do not add markdown logic or explanations."
-        val userPrompt = customPrompt ?: "请提取图片中的所有文字"
+        
+        // 完全匹配 Ollama 对话的提示词：只用 user message，不用 system prompt
+        val systemPrompt = ""
+        val userPrompt = customPrompt ?: "识别图中文字"
 
         val payload = buildImagePayload(bitmap, model, userPrompt, systemPrompt)
+        
+        // 调试日志：打印发送给 Ollama 的完整 payload
+        android.util.Log.d("OnlineOcrEngine", "=== OCR Request Payload ===")
+        android.util.Log.d("OnlineOcrEngine", "URL: $resolvedUrl")
+        android.util.Log.d("OnlineOcrEngine", "Payload: $payload")
+        
         val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
 
         val requestBuilder = Request.Builder()
@@ -66,6 +81,9 @@ class OnlineOcrEngine(
                     return@withContext emptyList()
                 }
 
+                android.util.Log.d("OnlineOcrEngine", "=== OCR Response ===")
+                android.util.Log.d("OnlineOcrEngine", "Raw response (前500字符): ${raw.take(500)}")
+
                 val json = runCatching { JSONObject(raw) }.getOrNull()
                 val content = json
                     ?.optJSONArray("choices")
@@ -73,6 +91,9 @@ class OnlineOcrEngine(
                     ?.optJSONObject("message")
                     ?.optString("content")
                     ?.takeIf { it.isNotBlank() }
+                
+                android.util.Log.d("OnlineOcrEngine", "提取的 content 长度: ${content?.length ?: 0}")
+                android.util.Log.d("OnlineOcrEngine", "Content 前200字符: ${content?.take(200)}")
                 
                 if (content != null) {
                     val cleanText = stripThinkTags(content).trim()

@@ -5,6 +5,7 @@ import com.example.mytransl.BuildConfig
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -603,7 +605,7 @@ fun SettingsScreen(
                                     ) {
                                         listOf(
                                             Triple("text", "文本", "✍️"),
-                                            Triple("ocr", "视觉", "👁️"),
+                                            // Triple("ocr", "视觉", "👁️"), // 暂时隐藏"视觉"可选项
                                             Triple("visual", "多模态", "📖")
                                         ).forEach { (id, label, icon) ->
                                             val isSelected = currentType == id
@@ -915,6 +917,88 @@ fun SettingsScreen(
                                         text = "范围：64 - 4096",
                                         fontSize = 10.sp,
                                         color = Slate400
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Appearance Settings Section
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    SectionHeader(
+                        title = "外观设置",
+                        icon = Icons.Default.Palette,
+                        themeColor = Color(0xFF8B5CF6),
+                        themeBg = Color(0xFFF3E8FF)
+                    )
+                    
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Font Size Slider
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "覆盖原文-文字大小",
+                                        style = MaterialTheme.typography.bodyLarge.copy(
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color(0xFF1F2937)
+                                        )
+                                    )
+                                    Text(
+                                        "${draft.overlayTextSize}sp",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF8B5CF6)
+                                        )
+                                    )
+                                }
+                                
+                                Slider(
+                                    value = draft.overlayTextSize.toFloat(),
+                                    onValueChange = { newValue ->
+                                        draft = draft.copy(overlayTextSize = newValue.toInt())
+                                        scope.launch { repo.saveSettings(draft) }
+                                    },
+                                    valueRange = 10f..30f,
+                                    steps = 19, // 10-30 共21个值，中间有19个step
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color(0xFF8B5CF6),
+                                        activeTrackColor = Color(0xFF8B5CF6),
+                                        inactiveTrackColor = Color(0xFFE9D5FF)
+                                    )
+                                )
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "10sp",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = Color(0xFF9CA3AF)
+                                        )
+                                    )
+                                    Text(
+                                        "30sp",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = Color(0xFF9CA3AF)
+                                        )
                                     )
                                 }
                             }

@@ -105,7 +105,7 @@ fun TranslateScreen() {
     var isTranslating by remember { mutableStateOf(false) }
     
     // Modes
-    val modes = listOf("文本翻译", "图像识别", "兽音加解密", "Base64 编解码")
+    val modes = listOf("文本翻译", "图像识别", "兽音加解密", "Base64 编解码", "ASCII 进制转换")
     var currentMode by rememberSaveable { mutableStateOf("文本翻译") }
 
     // Image Recognition State
@@ -353,7 +353,7 @@ fun TranslateScreen() {
                         filterNonBase64 = base64FilterNonBase64,
                         onFilterChange = { base64FilterNonBase64 = it }
                     )
-                } else {
+                } else if (currentMode != "ASCII 进制转换") {
                     val sourceOptions = if (currentMode == "图像识别") {
                         languages.filter { it != "自动检测" }
                     } else {
@@ -391,6 +391,7 @@ fun TranslateScreen() {
             }
             
             // Input Area
+            // Input Area
             if (currentMode == "图像识别") {
                 ImageRecognitionControls(
                     bitmap = selectedImageBitmap,
@@ -415,6 +416,21 @@ fun TranslateScreen() {
                     onTranslate = { doTranslate() },
                     isTranslating = isTranslating
                 )
+                
+                // Output Area for Image Recognition
+                AnimatedVisibility(visible = outputText.isNotEmpty()) {
+                    ModernOutputCard(
+                        outputText = outputText,
+                        onOutputChange = { outputText = it },
+                        targetLang = targetLang,
+                        onCopy = {
+                            clipboardManager.setText(AnnotatedString(outputText))
+                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            } else if (currentMode == "ASCII 进制转换") {
+                AsciiConversionControls()
             } else {
                 ModernInputCard(
                     inputText = inputText,
@@ -434,23 +450,23 @@ fun TranslateScreen() {
                         else -> "翻译"
                     }
                 )
-            }
-            
-            // Output Area
-            AnimatedVisibility(visible = outputText.isNotEmpty()) {
-                ModernOutputCard(
-                    outputText = outputText,
-                    onOutputChange = { outputText = it },
-                    targetLang = when (currentMode) {
-                        "兽音加解密" -> if (beastAction == "加密") "兽音密文" else "解密结果"
-                        "Base64 编解码" -> if (base64Action == "编码") "Base64 编码" else "解码结果"
-                        else -> targetLang
-                    },
-                    onCopy = {
-                        clipboardManager.setText(AnnotatedString(outputText))
-                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
-                    }
-                )
+                
+                // Output Area for Text/Beast/Base64
+                AnimatedVisibility(visible = outputText.isNotEmpty()) {
+                    ModernOutputCard(
+                        outputText = outputText,
+                        onOutputChange = { outputText = it },
+                        targetLang = when (currentMode) {
+                            "兽音加解密" -> if (beastAction == "加密") "兽音密文" else "解密结果"
+                            "Base64 编解码" -> if (base64Action == "编码") "Base64 编码" else "解码结果"
+                            else -> targetLang
+                        },
+                        onCopy = {
+                            clipboardManager.setText(AnnotatedString(outputText))
+                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(32.dp))

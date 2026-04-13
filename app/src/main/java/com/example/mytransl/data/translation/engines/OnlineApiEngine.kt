@@ -70,10 +70,11 @@ class OnlineApiEngine(
             - 必须执行翻译操作，严禁直接输出原文
             - 确保语序符合译文表达习惯
             - 返回内容只能是目标语言的译文，禁止包含任何原文片段
+            - 如果输入内容无法翻译（如纯符号、乱码），直接返回空字符串，严禁输出任何解释或指令复述
             ## Workflow：
             1. 接收输入后立即识别为翻译任务
             2. 执行逐句翻译，确保每句都有对应译文
-            3. 返回内容前必须检查返回的内容是否只有译文，禁止含有原文和系统提示词
+            3. 严禁输出任何元信息或指令复述，只返回纯译文
             $outputConstraint
         """.trimIndent()
         val customPrompt = config.prompt.trim().takeIf { it.isNotEmpty() }
@@ -132,7 +133,7 @@ class OnlineApiEngine(
                     ?.optString("content")
                     ?.takeIf { it.isNotBlank() }
                 if (translation != null) {
-                    return@withContext stripThinkTags(translation).trim()
+                    return@withContext cleanTranslationOutput(stripThinkTags(translation), source, target)
                 }
 
                 val translationText = json
@@ -141,21 +142,21 @@ class OnlineApiEngine(
                     ?.optString("text")
                     ?.takeIf { it.isNotBlank() }
                 if (translationText != null) {
-                    return@withContext stripThinkTags(translationText).trim()
+                    return@withContext cleanTranslationOutput(stripThinkTags(translationText), source, target)
                 }
 
                 val legacyTranslation = json?.optString("translation")?.takeIf { it.isNotBlank() }
                 if (legacyTranslation != null) {
-                    return@withContext stripThinkTags(legacyTranslation).trim()
+                    return@withContext cleanTranslationOutput(stripThinkTags(legacyTranslation), source, target)
                 }
 
                 val alt = json?.optString("text")?.takeIf { it.isNotBlank() }
                 if (alt != null) {
-                    return@withContext stripThinkTags(alt).trim()
+                    return@withContext cleanTranslationOutput(stripThinkTags(alt), source, target)
                 }
 
                 if (raw.isNotBlank()) {
-                    return@withContext stripThinkTags(raw)
+                    return@withContext cleanTranslationOutput(stripThinkTags(raw), source, target)
                 }
                 throw IllegalStateException("空响应")
             }
@@ -553,6 +554,31 @@ class OnlineApiEngine(
 // 去除大模型返回的思考标签内容
 private fun stripThinkTags(text: String): String {
     return text.replace(Regex("(?is)<think>.*?</think>"), "").trim()
+}
+
+/**
+ * 清洗翻译输出，移除 LLM 可能回显的提示词前缀
+ */
+private fun cleanTranslationOutput(text: String, sourceLanguage: String?, targetLanguage: String): String {
+    var cleaned = text.trim()
+    
+    // Pattern 1: "把下面内容从XX翻译成XX，只输出XX" 开头
+    val pattern1 = Regex("^把下面内容(从.{1,10})?翻译成.{1,10}[，,]?只?输出.{1,10}[:：]?\\s*")
+    cleaned = cleaned.replace(pattern1, "")
+    
+    // Pattern 2: "翻译：" 或 "翻译结果：" 开头
+    val pattern2 = Regex("^翻译(结果)?[:：]\\s*")
+    cleaned = cleaned.replace(pattern2, "")
+    
+    // Pattern 3: 如果第一行是提示词，提取后续内容
+    if (cleaned.contains('\n')) {
+        val lines = cleaned.split('\n')
+        if (lines[0].length < 50 && lines[0].contains("翻译") && lines[0].contains("输出")) {
+            cleaned = lines.drop(1).joinToString("\n").trim()
+        }
+    }
+    
+    return cleaned.trim()
 }
 
 // 将图片封装为多模态请求体

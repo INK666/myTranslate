@@ -183,6 +183,8 @@ class TranslationService : Service() {
                     cache = cache,
                     onValidationFailed = { _ -> }
                 )
+                // 更新覆盖层字体大小
+                overlay.setOverlayTextSize(state.overlayTextSize)
             }
         }
     }
@@ -193,14 +195,17 @@ class TranslationService : Service() {
     ): PreferredLanguageAwareOcrEngine {
         val id = state.ocrEngine.trim()
         
+        android.util.Log.d("TranslationService", "🔍 buildOcrEngine 调用")
+        android.util.Log.d("TranslationService", "   state.ocrEngine = \"$id\"")
+        android.util.Log.d("TranslationService", "   apiConfigs count = ${state.apiConfigs.size}")
+        
         // Check for Custom Online OCR
         val apiConfig = state.apiConfigs.find { it.name == id && it.isOcrModel }
+        
+        android.util.Log.d("TranslationService", "   找到的 apiConfig = ${apiConfig?.name ?: "null"}")
         if (apiConfig != null) {
-            // If current is already an OnlineOcrEngine for this config, keep it
-            // Simple check: strict implementation would require checking config equality
-            if (current is OnlineOcrEngine) {
-                 return current // Optimistic reuse, or recreate to be safe if config changed
-            }
+            android.util.Log.d("TranslationService", "   ✅ 使用 OnlineOcrEngine: ${apiConfig.name}, URL: ${apiConfig.baseUrl}")
+            // 每次都重新创建 OnlineOcrEngine，因为 config 可能已经变化
             return OnlineOcrEngine(apiConfig)
         }
 
@@ -825,17 +830,19 @@ class TranslationService : Service() {
                     val finalBlocks = if (sameLang) {
                         sortedBlocks
                     } else {
-                        val textsToTranslate = sortedBlocks.map { it.text }
-                        // 调用批量翻译接口
-                        val translatedTexts = engineManager.translateBatch(
-                            textsToTranslate, 
-                            source, 
-                            settings.targetLanguage, 
-                            settings
-                        )
-                        // 将译文回填到 TextBlock
-                        // 如果译文为空（说明被合并或翻译失败），则丢弃该块，避免显示原文
-                        sortedBlocks.zip(translatedTexts).mapNotNull { (block, trans) ->
+                        // 逐条翻译（Sequential Translation）
+                        // 避免 Batch 模式下的合并、格式错误等问题
+                        sortedBlocks.mapNotNull { block ->
+                            // 过滤无意义文本块（纯符号、短代码等）
+                            if (!isTranslatableText(block.text)) return@mapNotNull null
+                            
+                            val trans = engineManager.translate(
+                                block.text,
+                                source,
+                                settings.targetLanguage,
+                                settings
+                            )
+                            // translate 现在失败时返回空字符串（已修改 TranslationEngineManager）
                             if (trans.isNotEmpty()) block.copy(text = trans) else null
                         }
                     }
@@ -1284,6 +1291,33 @@ class TranslationService : Service() {
     }
 
 
+
+    /**
+     * 判断文本块是否值得翻译
+     * 过滤掉纯符号、纯数字、短代码等无意义内容
+     */
+    private fun isTranslatableText(text: String): Boolean {
+        val clean = text.trim()
+        
+        // 规则 1: 太短直接过滤（单字符）
+        if (clean.length < 2) return false
+        
+        // 规则 2: 纯标点符号
+        if (clean.matches(Regex("^[!！?？。、~～…·・，,;；:：]+$"))) return false
+        
+        // 规则 3: 纯数字或时间格式（13:38、370）
+        if (clean.matches(Regex("^[0-9:：/\\-]+$"))) return false
+        
+        // 规则 4: 纯英文/数字/少量符号，且短（<= 6字符），且无空格
+        // 这会过滤 "KB/S"、"Si30"、"OK" 等，但保留 "Hello world" 和较长单词
+        if (clean.length <= 6 && 
+            !clean.contains(' ') && 
+            clean.matches(Regex("^[a-zA-Z0-9/\\-]+$"))) {
+            return false
+        }
+        
+        return true
+    }
 
     private suspend fun buildContentOverlayItems(
     blocks: List<TextBlock>,
