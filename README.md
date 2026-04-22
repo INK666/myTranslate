@@ -1,4 +1,4 @@
-# MyT - Android 实时屏幕翻译工具
+# MyT - 文本翻译加解密app
 
 <div align="center">
 
