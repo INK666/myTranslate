@@ -53,8 +53,8 @@
 - **兽音加解密**：加解密
 - **ASCII码进制转换**：加解密
 <div align="center">
-<img width="1260" height="2800" alt="Screenshot_20260422_230533" src="https://github.com/user-attachments/assets/c01af7ff-eb88-4fb2-b60b-a8048d2db895" />
-<img width="1260" height="2800" alt="Screenshot_20260422_230448" src="https://github.com/user-attachments/assets/c838efe7-5744-4d5f-819b-1bc40184d0a8" />
+<img width="250" alt="Screenshot_20260422_230533" src="https://github.com/user-attachments/assets/c01af7ff-eb88-4fb2-b60b-a8048d2db895" />
+<img width="250" alt="Screenshot_20260422_230448" src="https://github.com/user-attachments/assets/c838efe7-5744-4d5f-819b-1bc40184d0a8" />
 </div>
 ---
 
