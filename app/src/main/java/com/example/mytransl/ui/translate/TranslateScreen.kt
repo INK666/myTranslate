@@ -74,6 +74,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.mytransl.data.codec.BeastCodec
 import com.example.mytransl.data.codec.Base64Codec
+import com.example.mytransl.data.codec.AbracadabraCodec
 import java.io.File
 
 // Modern Color Palette
@@ -105,7 +106,7 @@ fun TranslateScreen() {
     var isTranslating by remember { mutableStateOf(false) }
     
     // Modes
-    val modes = listOf("文本翻译", "图像识别", "兽音加解密", "Base64 编解码", "ASCII 进制转换")
+    val modes = listOf("文本翻译", "图像识别", "兽音加解密", "Base64 编解码", "ASCII 进制转换", "魔曰加解密")
     var currentMode by rememberSaveable { mutableStateOf("文本翻译") }
 
     // Image Recognition State
@@ -181,6 +182,10 @@ fun TranslateScreen() {
     var base64Charset by rememberSaveable { mutableStateOf("UTF-8") }
     var base64FilterNonBase64 by rememberSaveable { mutableStateOf(true) }
     
+    // Abracadabra (魔曰) Mode State
+    var abracadabraAction by rememberSaveable { mutableStateOf("解密") }
+    var abracadabraKey by rememberSaveable { mutableStateOf("") }
+    
     // Engine selection
     var selectedEngineId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedOcrId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -252,6 +257,14 @@ fun TranslateScreen() {
                         Base64Codec.encode(inputText, base64Charset)
                     } else {
                         Base64Codec.decode(inputText, base64Charset, base64FilterNonBase64)
+                    }
+                } else if (currentMode == "魔曰加解密") {
+                    withContext(Dispatchers.Default) {
+                        if (abracadabraAction == "加密") {
+                            AbracadabraCodec.encode(inputText, abracadabraKey)
+                        } else {
+                            AbracadabraCodec.decode(inputText, abracadabraKey)
+                        }
                     }
                 } else if (currentMode == "图像识别") {
                      val bitmap = selectedImageBitmap!!
@@ -353,6 +366,13 @@ fun TranslateScreen() {
                         filterNonBase64 = base64FilterNonBase64,
                         onFilterChange = { base64FilterNonBase64 = it }
                     )
+                } else if (currentMode == "魔曰加解密") {
+                    AbracadabraModeControls(
+                        abracadabraAction = abracadabraAction,
+                        onActionChange = { abracadabraAction = it },
+                        abracadabraKey = abracadabraKey,
+                        onKeyChange = { abracadabraKey = it }
+                    )
                 } else if (currentMode != "ASCII 进制转换") {
                     val sourceOptions = if (currentMode == "图像识别") {
                         languages.filter { it != "自动检测" }
@@ -447,6 +467,7 @@ fun TranslateScreen() {
                         "文本翻译" -> "翻译"
                         "兽音加解密" -> if (beastAction == "加密") "加密" else "解密"
                         "Base64 编解码" -> if (base64Action == "编码") "编码" else "解码"
+                        "魔曰加解密" -> if (abracadabraAction == "加密") "加密" else "解密"
                         else -> "翻译"
                     }
                 )
@@ -459,6 +480,7 @@ fun TranslateScreen() {
                         targetLang = when (currentMode) {
                             "兽音加解密" -> if (beastAction == "加密") "兽音密文" else "解密结果"
                             "Base64 编解码" -> if (base64Action == "编码") "Base64 编码" else "解码结果"
+                            "魔曰加解密" -> if (abracadabraAction == "加密") "魔曰密文" else "解密结果"
                             else -> targetLang
                         },
                         onCopy = {
@@ -1266,7 +1288,7 @@ fun ModernInputCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp, pressedElevation = 2.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .height(144.dp) // Reduced by 2/5 from 240.dp (240 * 0.6 = 144)
+            .height(220.dp)
             .shadow(
                 elevation = 8.dp, 
                 shape = RoundedCornerShape(24.dp), 
@@ -1367,7 +1389,7 @@ fun ModernOutputCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 140.dp)
+            .heightIn(min = 220.dp)
             .border(1.dp, PrimaryColor.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
