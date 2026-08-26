@@ -1302,6 +1302,76 @@ fun Base64ModeControls(
 }
 
 @Composable
+fun AbracadabraModeControls(
+    abracadabraAction: String,
+    onActionChange: (String) -> Unit,
+    abracadabraKey: String,
+    onKeyChange: (String) -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceColor),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, BorderColor, RoundedCornerShape(20.dp))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Slate100, RoundedCornerShape(12.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf("解密", "加密").forEach { action ->
+                    val isSelected = abracadabraAction == action
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(
+                                color = if (isSelected) Color.White else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onActionChange(action) }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = action,
+                            fontSize = 14.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isSelected) PrimaryColor else TextSecondary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = abracadabraKey,
+                onValueChange = onKeyChange,
+                label = { Text("密钥（默认: ABRACADABRA）", fontSize = 13.sp) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = PrimaryColor,
+                    unfocusedBorderColor = BorderColor,
+                    cursorColor = PrimaryColor
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun ModernInputCard(
     inputText: String,
     onInputChange: (String) -> Unit,
