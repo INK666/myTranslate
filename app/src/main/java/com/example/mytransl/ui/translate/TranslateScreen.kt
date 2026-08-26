@@ -75,6 +75,7 @@ import kotlinx.coroutines.withContext
 import com.example.mytransl.data.codec.BeastCodec
 import com.example.mytransl.data.codec.Base64Codec
 import com.example.mytransl.data.codec.AbracadabraCodec
+import com.example.mytransl.data.codec.ZakoWhisperCodec
 import java.io.File
 
 // Modern Color Palette
@@ -106,7 +107,7 @@ fun TranslateScreen() {
     var isTranslating by remember { mutableStateOf(false) }
     
     // Modes
-    val modes = listOf("文本翻译", "图像识别", "兽音加解密", "Base64 编解码", "ASCII 进制转换", "魔曰加解密")
+    val modes = listOf("文本翻译", "图像识别", "兽音加解密", "Base64 编解码", "ASCII 进制转换", "魔曰加解密", "杂语加解密")
     var currentMode by rememberSaveable { mutableStateOf("文本翻译") }
 
     // Image Recognition State
@@ -185,6 +186,11 @@ fun TranslateScreen() {
     // Abracadabra (魔曰) Mode State
     var abracadabraAction by rememberSaveable { mutableStateOf("解密") }
     var abracadabraKey by rememberSaveable { mutableStateOf("") }
+
+    // Zako Whisper (杂语) Mode State
+    var zakoAction by rememberSaveable { mutableStateOf("解密") }
+    var zakoKey by rememberSaveable { mutableStateOf(ZakoWhisperCodec.DEFAULT_KEY) }
+    var zakoStrength by rememberSaveable { mutableStateOf(ZakoWhisperCodec.Strength.Standard.label) }
     
     // Engine selection
     var selectedEngineId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -264,6 +270,14 @@ fun TranslateScreen() {
                             AbracadabraCodec.encode(inputText, abracadabraKey)
                         } else {
                             AbracadabraCodec.decode(inputText, abracadabraKey)
+                        }
+                    }
+                } else if (currentMode == "杂语加解密") {
+                    withContext(Dispatchers.Default) {
+                        if (zakoAction == "加密") {
+                            ZakoWhisperCodec.encode(inputText, zakoKey, zakoStrength)
+                        } else {
+                            ZakoWhisperCodec.decode(inputText, zakoKey)
                         }
                     }
                 } else if (currentMode == "图像识别") {
@@ -373,6 +387,19 @@ fun TranslateScreen() {
                         abracadabraKey = abracadabraKey,
                         onKeyChange = { abracadabraKey = it }
                     )
+                } else if (currentMode == "杂语加解密") {
+                    ZakoWhisperModeControls(
+                        action = zakoAction,
+                        onActionChange = { zakoAction = it },
+                        keyText = zakoKey,
+                        onKeyChange = { zakoKey = it },
+                        strength = zakoStrength,
+                        onStrengthChange = { zakoStrength = it },
+                        onGenerateKey = {
+                            zakoKey = ZakoWhisperCodec.generateKey()
+                            Toast.makeText(context, "已生成随机密钥", Toast.LENGTH_SHORT).show()
+                        }
+                    )
                 } else if (currentMode != "ASCII 进制转换") {
                     val sourceOptions = if (currentMode == "图像识别") {
                         languages.filter { it != "自动检测" }
@@ -468,6 +495,7 @@ fun TranslateScreen() {
                         "兽音加解密" -> if (beastAction == "加密") "加密" else "解密"
                         "Base64 编解码" -> if (base64Action == "编码") "编码" else "解码"
                         "魔曰加解密" -> if (abracadabraAction == "加密") "加密" else "解密"
+                        "杂语加解密" -> if (zakoAction == "加密") "加密" else "解密"
                         else -> "翻译"
                     }
                 )
@@ -481,6 +509,7 @@ fun TranslateScreen() {
                             "兽音加解密" -> if (beastAction == "加密") "兽音密文" else "解密结果"
                             "Base64 编解码" -> if (base64Action == "编码") "Base64 编码" else "解码结果"
                             "魔曰加解密" -> if (abracadabraAction == "加密") "魔曰密文" else "解密结果"
+                            "杂语加解密" -> if (zakoAction == "加密") "杂语密文" else "解密结果"
                             else -> targetLang
                         },
                         onCopy = {

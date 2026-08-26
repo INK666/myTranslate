@@ -47,8 +47,20 @@ class OnlineApiEngine(
             else -> "输出语言必须与目标语言一致。"
         }
 
+        val isOverlayMode = settings.resultMode == "覆盖层"
         val userPrompt = buildString {
-            if (source == null) {
+            if (isOverlayMode) {
+                if (source == null) {
+                    append("任务：翻译为")
+                    append(toPromptLanguage(target))
+                } else {
+                    append("任务：")
+                    append(toPromptLanguage(source))
+                    append("翻译为")
+                    append(toPromptLanguage(target))
+                }
+                append("\n要求：只输出译文\n文本：\n")
+            } else if (source == null) {
                 append("把下面内容翻译成")
                 append(toPromptLanguage(target))
                 append("，只输出")
@@ -64,19 +76,23 @@ class OnlineApiEngine(
             append(text)
         }
 
-        val systemPrompt = """
-            # Role：严格翻译执行器
-            ## Constraints：
-            - 必须执行翻译操作，严禁直接输出原文
-            - 确保语序符合译文表达习惯
-            - 返回内容只能是目标语言的译文，禁止包含任何原文片段
-            - 如果输入内容无法翻译（如纯符号、乱码），直接返回空字符串，严禁输出任何解释或指令复述
-            ## Workflow：
-            1. 接收输入后立即识别为翻译任务
-            2. 执行逐句翻译，确保每句都有对应译文
-            3. 严禁输出任何元信息或指令复述，只返回纯译文
-            $outputConstraint
-        """.trimIndent()
+        val systemPrompt = if (isOverlayMode) {
+            "只做翻译。输出${toPromptLanguage(target)}译文；不要解释，不要复述原文或指令。$outputConstraint"
+        } else {
+            """
+                # Role：严格翻译执行器
+                ## Constraints：
+                - 必须执行翻译操作，严禁直接输出原文
+                - 确保语序符合译文表达习惯
+                - 返回内容只能是目标语言的译文，禁止包含任何原文片段
+                - 如果输入内容无法翻译（如纯符号、乱码），直接返回空字符串，严禁输出任何解释或指令复述
+                ## Workflow：
+                1. 接收输入后立即识别为翻译任务
+                2. 执行逐句翻译，确保每句都有对应译文
+                3. 严禁输出任何元信息或指令复述，只返回纯译文
+                $outputConstraint
+            """.trimIndent()
+        }
         val customPrompt = config.prompt.trim().takeIf { it.isNotEmpty() }
         val finalSystemPrompt = buildString {
             append(systemPrompt)

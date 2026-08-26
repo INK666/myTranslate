@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.mytransl"
         minSdk = 24
         targetSdk = 36
-        versionCode = 111000
-        versionName = "1.11"
+        versionCode = 112000
+        versionName = "1.12"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
