@@ -366,7 +366,7 @@ class OnlineApiEngine(
         val source = sourceLanguage?.trim()?.takeIf { it.isNotEmpty() }
         val target = targetLanguage.trim().takeIf { it.isNotEmpty() } ?: "英语"
 
-        // 1. 构建输入 JSON 列表
+        // 1. 构建输入 JSON 列表与全屏上下文参考
         val inputJsonArray = JSONArray()
         chunk.forEachIndexed { id, text ->
             inputJsonArray.put(
@@ -374,19 +374,24 @@ class OnlineApiEngine(
             )
         }
         val inputJsonStr = inputJsonArray.toString()
+        val plainContext = chunk.filter { it.isNotBlank() }.joinToString("\n")
 
         val userPrompt = buildString {
+            append("【屏幕整体语境参考（请先通读以理解全文语义与连贯逻辑）】：\n")
+            append(plainContext)
+            append("\n\n")
             if (source == null) {
-                append("将以下 JSON 数据中的 \"text\" 字段内容翻译成")
+                append("【翻译任务】：结合上述完整语境，将以下 JSON 数据中的各个 \"text\" 片段翻译成")
                 append(toPromptLanguage(target))
             } else {
-                append("将以下 JSON 数据中的 \"text\" 字段内容从")
+                append("【翻译任务】：结合上述完整语境，将以下 JSON 数据中的各个 \"text\" 片段从")
                 append(toPromptLanguage(source))
                 append("翻译成")
                 append(toPromptLanguage(target))
             }
-            append("。请严格保持 JSON 数组格式返回，结构与输入一致：[{\"id\": 0, \"text\": \"译文\"}, ...]。\n")
-            append("数据内容：\n")
+            append("。\n")
+            append("【核心要求】：各个片段的译文必须在语法、代词和语序上与上下文自然连贯，消除因断句切分带来的生硬割裂感。严格输出对应 JSON 数组：[{\"id\": 0, \"text\": \"译文\"}, ...]。\n")
+            append("待翻译数据：\n")
             append(inputJsonStr)
         }
 
@@ -397,14 +402,14 @@ class OnlineApiEngine(
         }
 
         val systemPrompt = """
-            # Role：JSON 批量翻译专家
-            ## Constraints：
-            - 你只输出标准的 JSON 数组，严禁包含 markdown 代码块标记（如 ```json）。
-            - 严禁输出任何解释性文字或前言/后缀。
-            - 必须保留原始 "id" 字段（与输入完全对应，不得遗漏任何一项）。
-            - 仅翻译 "text" 字段的值，不要修改键名。
-            - 如果原文无法翻译（如纯乱码），text 字段留空 ""。
-            - 严禁对文本进行续写或补全，只翻译提供的片段。
+            # Role：上下文感知的高级翻译专家 (Context-Aware Translation Expert)
+            ## Workflow & Rules：
+            1. 你将收到一段【屏幕整体语境参考】和对应的待翻译 JSON 列表。
+            2. 首先通读整体语境，把握段落大意、对话语气、代词指代和专有名词。
+            3. 在全局语境指导下翻译每个 text 字段。即使原文被截断成多行，各片段翻译组合起来也必须是通顺地道、符合母语习惯的句子，严禁孤立逐词机翻。
+            4. 必须保留原始 "id" 字段（与输入完全对应，不得遗漏、合并或修改 id）。
+            5. 仅翻译 "text" 字段的值，如果原文为纯乱码或无意义符号，text 留空 ""。
+            6. 严格只输出标准 JSON 数组，严禁包含任何 markdown 代码块标记（如 ```json）或前后解释说明。
             $outputConstraint
         """.trimIndent()
 
