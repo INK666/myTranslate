@@ -580,6 +580,42 @@ fun SettingsScreen(
                                         singleLine = false,
                                         maxLines = 6
                                     )
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp, bottom = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                            Text(
+                                                text = "深度思考",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Slate800
+                                            )
+                                            Text(
+                                                text = "默认关闭。关闭可显著提升翻译速度，避免思维链内容",
+                                                fontSize = 11.sp,
+                                                color = Slate400
+                                            )
+                                        }
+                                        Switch(
+                                            checked = cfg.enableThinking,
+                                            onCheckedChange = { isChecked ->
+                                                val updated = draft.apiConfigs.toMutableList()
+                                                updated[index] = cfg.copy(enableThinking = isChecked)
+                                                draft = normalizeDefaultEngine(draft.copy(apiConfigs = updated))
+                                            },
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = Color.White,
+                                                checkedTrackColor = Emerald500,
+                                                uncheckedThumbColor = Color.White,
+                                                uncheckedTrackColor = Slate300
+                                            )
+                                        )
+                                    }
                                 }
 
                                 val statusText = testStatusByIndex[index].orEmpty()

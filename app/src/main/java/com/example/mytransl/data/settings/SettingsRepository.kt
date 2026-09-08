@@ -24,7 +24,8 @@ data class ApiConfig(
     val prompt: String = "",
     val type: String = "openai", // "openai" or "microsoft"
     val isVisualModel: Boolean = false,
-    val isOcrModel: Boolean = false
+    val isOcrModel: Boolean = false,
+    val enableThinking: Boolean = false
 )
 
 data class SettingsState(
@@ -154,7 +155,8 @@ private fun parseApiConfigs(raw: String?): List<ApiConfig> {
                             prompt = prompt,
                             type = type,
                             isVisualModel = isVisualModel,
-                            isOcrModel = obj.optBoolean("isOcrModel", false)
+                            isOcrModel = obj.optBoolean("isOcrModel", false),
+                            enableThinking = obj.optBoolean("enableThinking", false)
                         )
                     )
                 }
@@ -176,6 +178,7 @@ private fun serializeApiConfigs(configs: List<ApiConfig>): String {
             .put("type", cfg.type)
             .put("isVisualModel", cfg.isVisualModel)
             .put("isOcrModel", cfg.isOcrModel)
+            .put("enableThinking", cfg.enableThinking)
         arr.put(obj)
     }
     return arr.toString()

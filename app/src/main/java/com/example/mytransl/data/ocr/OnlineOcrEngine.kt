@@ -51,7 +51,7 @@ class OnlineOcrEngine(
         val systemPrompt = ""
         val userPrompt = customPrompt ?: "识别图中文字"
 
-        val payload = buildImagePayload(bitmap, model, userPrompt, systemPrompt)
+        val payload = buildImagePayload(bitmap, model, userPrompt, systemPrompt, config.enableThinking)
         
         // 调试日志：打印发送给 Ollama 的完整 payload
         android.util.Log.d("OnlineOcrEngine", "=== OCR Request Payload ===")
@@ -96,7 +96,7 @@ class OnlineOcrEngine(
                 android.util.Log.d("OnlineOcrEngine", "Content 前200字符: ${content?.take(200)}")
                 
                 if (content != null) {
-                    val cleanText = stripThinkTags(content).trim()
+                    val cleanText = content.trim()
                     if (cleanText.isEmpty()) return@withContext emptyList()
                     
                     // Wrap result in a single TextBlock covering the whole image
@@ -129,15 +129,12 @@ class OnlineOcrEngine(
         return "$noTrailingSlash/v1/chat/completions"
     }
 
-    private fun stripThinkTags(text: String): String {
-        return text.replace(Regex("(?is)<think>.*?</think>"), "").trim()
-    }
-
     private fun buildImagePayload(
         image: Bitmap,
         model: String,
         userPrompt: String,
-        systemPrompt: String
+        systemPrompt: String,
+        enableThinking: Boolean = false
     ): String {
         val base64Image = bitmapToBase64Png(image)
         val messages = JSONArray()
@@ -161,13 +158,25 @@ class OnlineOcrEngine(
                     )
             )
 
-        return JSONObject()
+        val payloadObj = JSONObject()
             .put("model", model)
             .put("messages", messages)
             .put("temperature", 0)
             .put("stream", false)
-            .put("max_tokens", 2048) // A bit larger for full page text
-            .toString()
+
+        if (enableThinking) {
+            payloadObj.put("max_tokens", 4096)
+            payloadObj.put("thinking", JSONObject().put("type", "enabled"))
+        } else {
+            payloadObj.put("thinking", JSONObject().put("type", "disabled"))
+            payloadObj.put("enable_thinking", false)
+            val lowerModel = model.lowercase()
+            if (lowerModel.startsWith("o1") || lowerModel.startsWith("o3") || lowerModel.startsWith("o4")) {
+                payloadObj.put("reasoning_effort", "low")
+            }
+            payloadObj.put("max_tokens", 3072)
+        }
+        return payloadObj.toString()
     }
 
     private fun bitmapToBase64Png(bitmap: Bitmap): String {

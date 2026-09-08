@@ -116,13 +116,13 @@ class OnlineApiEngine(
                 .put("content", userPrompt)
         )
 
-        val payload = JSONObject()
+        val payloadObj = JSONObject()
             .put("model", model)
             .put("messages", messagesArray)
             .put("temperature", 0)
             .put("stream", false)
-            .put("max_tokens", 1024)
-            .toString()
+        applyThinkingControl(payloadObj, config.enableThinking, model, 3072)
+        val payload = payloadObj.toString()
         val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
 
         val requestBuilder = Request.Builder()
@@ -135,47 +135,73 @@ class OnlineApiEngine(
         }
 
         try {
-            client.newCall(requestBuilder.build()).execute().use { resp ->
-                val raw = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    throw IllegalStateException("HTTP ${resp.code}: $raw")
-                }
+            var resp = client.newCall(requestBuilder.build()).execute()
+            var raw = resp.use { it.body?.string().orEmpty() }
 
-                val json = runCatching { JSONObject(raw) }.getOrNull()
-                val translation = json
-                    ?.optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.optString("content")
-                    ?.takeIf { it.isNotBlank() }
-                if (translation != null) {
-                    return@withContext cleanTranslationOutput(stripThinkTags(translation), source, target)
+            // 容错机制：如果关闭思考参数被非标/严格 API 报错 400，自动剥离思考参数回退重试一次
+            if (resp.code == 400 && !config.enableThinking && (raw.contains("thinking", ignoreCase = true) || raw.contains("unrecognized", ignoreCase = true) || raw.contains("argument", ignoreCase = true))) {
+                val fallbackPayload = JSONObject()
+                    .put("model", model)
+                    .put("messages", messagesArray)
+                    .put("temperature", 0)
+                    .put("stream", false)
+                    .put("max_tokens", 3072)
+                    .toString()
+                val fallbackReq = Request.Builder()
+                    .url(resolvedUrl)
+                    .post(fallbackPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                if (apiKey.isNotEmpty()) {
+                    fallbackReq.header("Authorization", "Bearer $apiKey")
                 }
-
-                val translationText = json
-                    ?.optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optString("text")
-                    ?.takeIf { it.isNotBlank() }
-                if (translationText != null) {
-                    return@withContext cleanTranslationOutput(stripThinkTags(translationText), source, target)
-                }
-
-                val legacyTranslation = json?.optString("translation")?.takeIf { it.isNotBlank() }
-                if (legacyTranslation != null) {
-                    return@withContext cleanTranslationOutput(stripThinkTags(legacyTranslation), source, target)
-                }
-
-                val alt = json?.optString("text")?.takeIf { it.isNotBlank() }
-                if (alt != null) {
-                    return@withContext cleanTranslationOutput(stripThinkTags(alt), source, target)
-                }
-
-                if (raw.isNotBlank()) {
-                    return@withContext cleanTranslationOutput(stripThinkTags(raw), source, target)
-                }
-                throw IllegalStateException("空响应")
+                resp = client.newCall(fallbackReq.build()).execute()
+                raw = resp.use { it.body?.string().orEmpty() }
             }
+
+            if (!resp.isSuccessful) {
+                throw IllegalStateException("HTTP ${resp.code}: $raw")
+            }
+
+            val json = runCatching { JSONObject(raw) }.getOrNull()
+            val translation = json
+                ?.optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                ?.takeIf { it.isNotBlank() }
+            if (translation != null) {
+                return@withContext translation.trim()
+            }
+
+            val translationText = json
+                ?.optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optString("text")
+                ?.takeIf { it.isNotBlank() }
+            if (translationText != null) {
+                return@withContext translationText.trim()
+            }
+
+            val legacyTranslation = json?.optString("translation")?.takeIf { it.isNotBlank() }
+            if (legacyTranslation != null) {
+                return@withContext legacyTranslation.trim()
+            }
+
+            val alt = json?.optString("text")?.takeIf { it.isNotBlank() }
+            if (alt != null) {
+                return@withContext alt.trim()
+            }
+
+            val choice0 = json?.optJSONArray("choices")?.optJSONObject(0)
+            val finishReason = choice0?.optString("finish_reason")
+            val hasReasoning = !choice0?.optJSONObject("message")?.optString("reasoning_content").isNullOrBlank()
+            if (finishReason == "length" && hasReasoning) {
+                throw IllegalStateException("Token 耗尽（当前模型强制思考导致预算不足，请开启【深度思考】或更换为通用翻译模型）")
+            }
+
+            if (raw.isNotBlank()) {
+                return@withContext raw.trim()
+            }
+            throw IllegalStateException("空响应")
         } catch (t: Throwable) {
             throw t
         }
@@ -240,7 +266,7 @@ class OnlineApiEngine(
             }
         }
 
-        val payload = buildImagePayload(image, model, userPrompt, finalSystemPrompt)
+        val payload = buildImagePayload(image, model, userPrompt, finalSystemPrompt, config.enableThinking)
         val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
 
         val requestBuilder = Request.Builder()
@@ -266,7 +292,7 @@ class OnlineApiEngine(
                 ?.optString("content")
                 ?.takeIf { it.isNotBlank() }
             if (translation != null) {
-                return@withContext stripThinkTags(translation).trim()
+                return@withContext translation.trim()
             }
 
             val translationText = json
@@ -275,21 +301,28 @@ class OnlineApiEngine(
                 ?.optString("text")
                 ?.takeIf { it.isNotBlank() }
             if (translationText != null) {
-                return@withContext stripThinkTags(translationText).trim()
+                return@withContext translationText.trim()
             }
 
             val legacyTranslation = json?.optString("translation")?.takeIf { it.isNotBlank() }
             if (legacyTranslation != null) {
-                return@withContext stripThinkTags(legacyTranslation).trim()
+                return@withContext legacyTranslation.trim()
             }
 
             val alt = json?.optString("text")?.takeIf { it.isNotBlank() }
             if (alt != null) {
-                return@withContext stripThinkTags(alt).trim()
+                return@withContext alt.trim()
+            }
+
+            val choice0 = json?.optJSONArray("choices")?.optJSONObject(0)
+            val finishReason = choice0?.optString("finish_reason")
+            val hasReasoning = !choice0?.optJSONObject("message")?.optString("reasoning_content").isNullOrBlank()
+            if (finishReason == "length" && hasReasoning) {
+                throw IllegalStateException("Token 耗尽（当前模型强制思考导致预算不足，请开启【深度思考】或更换为通用翻译模型）")
             }
 
             if (raw.isNotBlank()) {
-                return@withContext stripThinkTags(raw)
+                return@withContext raw.trim()
             }
             throw IllegalStateException("空响应")
         }
@@ -301,23 +334,41 @@ class OnlineApiEngine(
         settings: SettingsState
     ): List<String> = withContext(Dispatchers.IO) {
         if (batch.isEmpty()) return@withContext emptyList()
-        
-        // Convert List to Map<Index, Text>
-        val batchMap = batch.mapIndexed { index, text -> index to text }.toMap()
 
         val resolvedUrl = resolveApiUrl(config.baseUrl)
         if (resolvedUrl.isEmpty()) {
-            // Fallback to sequential if URL invalid (though translate() handles empty URL check too)
-             return@withContext batch.map { "" }
+            return@withContext batch.map { "" }
         }
 
+        // Chunk large batches to avoid context/token overflow (max 25 items per batch)
+        val chunkSize = 25
+        if (batch.size > chunkSize) {
+            val chunks = batch.chunked(chunkSize)
+            val allResults = mutableListOf<String>()
+            for (chunk in chunks) {
+                val chunkResults = translateBatchChunk(chunk, sourceLanguage, targetLanguage, settings, resolvedUrl)
+                allResults.addAll(chunkResults)
+            }
+            return@withContext allResults
+        }
+
+        return@withContext translateBatchChunk(batch, sourceLanguage, targetLanguage, settings, resolvedUrl)
+    }
+
+    private suspend fun translateBatchChunk(
+        chunk: List<String>,
+        sourceLanguage: String?,
+        targetLanguage: String,
+        settings: SettingsState,
+        resolvedUrl: String
+    ): List<String> = withContext(Dispatchers.IO) {
         val model = config.model.trim().ifEmpty { id }
         val source = sourceLanguage?.trim()?.takeIf { it.isNotEmpty() }
         val target = targetLanguage.trim().takeIf { it.isNotEmpty() } ?: "英语"
 
         // 1. 构建输入 JSON 列表
         val inputJsonArray = JSONArray()
-        batchMap.forEach { (id, text) ->
+        chunk.forEachIndexed { id, text ->
             inputJsonArray.put(
                 JSONObject().put("id", id).put("text", text)
             )
@@ -334,7 +385,7 @@ class OnlineApiEngine(
                 append("翻译成")
                 append(toPromptLanguage(target))
             }
-            append("。请严格保持 JSON 格式返回，结构为 [{\"id\": 1, \"text\": \"译文\"}, ...]。\n")
+            append("。请严格保持 JSON 数组格式返回，结构与输入一致：[{\"id\": 0, \"text\": \"译文\"}, ...]。\n")
             append("数据内容：\n")
             append(inputJsonStr)
         }
@@ -346,15 +397,13 @@ class OnlineApiEngine(
         }
 
         val systemPrompt = """
-            # Role：JSON 翻译专家
+            # Role：JSON 批量翻译专家
             ## Constraints：
             - 你只输出标准的 JSON 数组，严禁包含 markdown 代码块标记（如 ```json）。
             - 严禁输出任何解释性文字或前言/后缀。
-            - 必须保留原始 "id" 字段不变。
+            - 必须保留原始 "id" 字段（与输入完全对应，不得遗漏任何一项）。
             - 仅翻译 "text" 字段的值，不要修改键名。
-            - 如果原文无法翻译（如纯乱码），text 字段留空。
-            - 对每个text 独立翻译，
-            - 翻译完一个text后立即将译文对原文进行替换，替换完成才能翻译下一个text。
+            - 如果原文无法翻译（如纯乱码），text 字段留空 ""。
             - 严禁对文本进行续写或补全，只翻译提供的片段。
             $outputConstraint
         """.trimIndent()
@@ -372,13 +421,14 @@ class OnlineApiEngine(
         messagesArray.put(JSONObject().put("role", "system").put("content", finalSystemPrompt))
         messagesArray.put(JSONObject().put("role", "user").put("content", userPrompt))
 
-        val payload = JSONObject()
+        val payloadObj = JSONObject()
             .put("model", model)
             .put("messages", messagesArray)
             .put("temperature", 0)
             .put("stream", false)
-            .put("max_tokens", (inputJsonStr.length * 2).coerceAtLeast(1024))
-            .toString()
+        val defaultTokens = (inputJsonStr.length * 3).coerceAtLeast(1024)
+        applyThinkingControl(payloadObj, config.enableThinking, model, defaultTokens)
+        val payload = payloadObj.toString()
 
         val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
         val requestBuilder = Request.Builder().url(resolvedUrl).post(body)
@@ -391,8 +441,7 @@ class OnlineApiEngine(
             client.newCall(requestBuilder.build()).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                   // Log error and fallback? Or throw? Throwing allows Manager to handle.
-                   throw IllegalStateException("HTTP ${resp.code}: $raw")
+                    throw IllegalStateException("HTTP ${resp.code}: $raw")
                 }
 
                 val jsonResponse = runCatching { JSONObject(raw) }.getOrNull()
@@ -402,9 +451,11 @@ class OnlineApiEngine(
                     ?.optJSONObject("message")
                     ?.optString("content")
                     .orEmpty()
-                
-                var cleanContent = stripThinkTags(content).trim()
-                
+
+                var cleanContent = content.trim()
+                // 移除可能的 markdown 标记
+                cleanContent = cleanContent.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+
                 val jsonStart = cleanContent.indexOf('[')
                 val jsonEnd = cleanContent.lastIndexOf(']')
                 if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
@@ -418,25 +469,47 @@ class OnlineApiEngine(
                     for (i in 0 until resultJsonArray.length()) {
                         val item = resultJsonArray.optJSONObject(i)
                         if (item != null) {
-                            val id = item.optInt("id", -1)
-                            val text = item.optString("text")
+                            val id = item.optInt("id", item.optString("id").toIntOrNull() ?: -1)
+                            val text = item.optString("text").ifEmpty {
+                                item.optString("translation").ifEmpty {
+                                    item.optString("t")
+                                }
+                            }
                             if (id != -1) {
                                 resultMap[id] = text
                             }
                         }
                     }
-                } else {
-                     val regex = Regex("\\{\"id\":\\s*(\\d+),\\s*\"text\":\\s*\"(.*?)\"\\}")
-                     regex.findAll(cleanContent).forEach { match ->
-                         val id = match.groupValues[1].toIntOrNull()
-                         val txt = match.groupValues[2]
-                         if (id != null) resultMap[id] = txt
-                     }
                 }
-                
-                // Convert Map back to List, preserving order
-                return@withContext batch.mapIndexed { index, _ -> 
-                    resultMap[index] ?: "" // Return empty string if failed, or maybe original? Empty implies failure.
+
+                // 正则容错 1：JSON 键值对提取
+                if (resultMap.size < chunk.size) {
+                    val regex = Regex("""["']?id["']?\s*:\s*(\d+)\s*,\s*["']?(?:text|translation|t)["']?\s*:\s*["'](.*?)["'](?:\s*[,}])""")
+                    regex.findAll(cleanContent).forEach { match ->
+                        val id = match.groupValues[1].toIntOrNull()
+                        val txt = match.groupValues[2]
+                        if (id != null && !resultMap.containsKey(id)) {
+                            resultMap[id] = txt
+                        }
+                    }
+                }
+
+                // 正则容错 2：行编号匹配（如 0: 译文 或 0. 译文）
+                if (resultMap.size < chunk.size) {
+                    val lineRegex = Regex("""(?m)^\s*(\d+)[\.\:\、\s]\s*(.+)$""")
+                    lineRegex.findAll(content).forEach { match ->
+                        val id = match.groupValues[1].toIntOrNull()
+                        val txt = match.groupValues[2].trim()
+                        if (id != null && id < chunk.size && !resultMap.containsKey(id)) {
+                            resultMap[id] = txt
+                        }
+                    }
+                }
+
+                // 按原输入顺序 1:1 输出
+                return@withContext chunk.mapIndexed { index, originalText ->
+                    val trans = resultMap[index]?.trim()
+                    if (trans != null && trans.isNotEmpty() && trans != originalText) trans else ""
                 }
             }
         } catch (t: Throwable) {
@@ -497,7 +570,7 @@ class OnlineApiEngine(
             }
         }
 
-        val payload = buildImagePayload(image, model, userPrompt, finalSystemPrompt)
+        val payload = buildImagePayload(image, model, userPrompt, finalSystemPrompt, config.enableThinking)
         val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
 
         val requestBuilder = Request.Builder().url(resolvedUrl).post(body)
@@ -520,7 +593,7 @@ class OnlineApiEngine(
                 ?.optString("content")
                 .orEmpty()
             
-            var cleanContent = stripThinkTags(content).trim()
+            var cleanContent = content.trim()
             
             // 某些 API 返回的 content 可能错误地保留了转义符，导致 JSON 解析失败
             // 强制还原：将 \" 替换为 "
@@ -567,34 +640,28 @@ class OnlineApiEngine(
     }
 }
 
-// 去除大模型返回的思考标签内容
-private fun stripThinkTags(text: String): String {
-    return text.replace(Regex("(?is)<think>.*?</think>"), "").trim()
-}
-
-/**
- * 清洗翻译输出，移除 LLM 可能回显的提示词前缀
- */
-private fun cleanTranslationOutput(text: String, sourceLanguage: String?, targetLanguage: String): String {
-    var cleaned = text.trim()
-    
-    // Pattern 1: "把下面内容从XX翻译成XX，只输出XX" 开头
-    val pattern1 = Regex("^把下面内容(从.{1,10})?翻译成.{1,10}[，,]?只?输出.{1,10}[:：]?\\s*")
-    cleaned = cleaned.replace(pattern1, "")
-    
-    // Pattern 2: "翻译：" 或 "翻译结果：" 开头
-    val pattern2 = Regex("^翻译(结果)?[:：]\\s*")
-    cleaned = cleaned.replace(pattern2, "")
-    
-    // Pattern 3: 如果第一行是提示词，提取后续内容
-    if (cleaned.contains('\n')) {
-        val lines = cleaned.split('\n')
-        if (lines[0].length < 50 && lines[0].contains("翻译") && lines[0].contains("输出")) {
-            cleaned = lines.drop(1).joinToString("\n").trim()
+// 统一注入思考控制参数
+private fun applyThinkingControl(
+    payload: JSONObject,
+    enableThinking: Boolean,
+    modelName: String,
+    defaultMaxTokens: Int = 3072
+): JSONObject {
+    if (enableThinking) {
+        payload.put("max_tokens", maxOf(defaultMaxTokens, 4096))
+        payload.put("thinking", JSONObject().put("type", "enabled"))
+    } else {
+        // 关闭深度思考：适配 DeepSeek、火山方舟 (Volcengine Ark)、Claude 与通义千问等
+        payload.put("thinking", JSONObject().put("type", "disabled"))
+        payload.put("enable_thinking", false)
+        val lowerModel = modelName.lowercase()
+        if (lowerModel.startsWith("o1") || lowerModel.startsWith("o3") || lowerModel.startsWith("o4")) {
+            payload.put("reasoning_effort", "low")
         }
+        // 底线防护：即使用户关闭思考开关，也将基础 max_tokens 保守设定为 3072，防范关不掉思考的模型吃满预算导致空响应
+        payload.put("max_tokens", maxOf(defaultMaxTokens, 3072))
     }
-    
-    return cleaned.trim()
+    return payload
 }
 
 // 将图片封装为多模态请求体
@@ -602,7 +669,8 @@ private fun buildImagePayload(
     image: Bitmap,
     model: String,
     userPrompt: String,
-    systemPrompt: String
+    systemPrompt: String,
+    enableThinking: Boolean = false
 ): String {
     val base64Image = bitmapToBase64Png(image)
     val messages = JSONArray()
@@ -626,13 +694,14 @@ private fun buildImagePayload(
                 )
         )
 
-    return JSONObject()
+    val payloadObj = JSONObject()
         .put("model", model)
         .put("messages", messages)
         .put("temperature", 0)
         .put("stream", false)
-        .put("max_tokens", 1024)
-        .toString()
+
+    applyThinkingControl(payloadObj, enableThinking, model, 3072)
+    return payloadObj.toString()
 }
 
 // 简易 PNG Base64 编码
@@ -748,7 +817,7 @@ suspend fun testOnlineApiConnection(
         if (resolvedUrl.isEmpty()) throw IllegalArgumentException("API URL 为空")
     
         val model = config.model.trim().ifEmpty { "gpt-4o-mini" }
-        val payload = JSONObject()
+        val payloadObj = JSONObject()
             .put("model", model)
             .put(
                 "messages",
@@ -760,9 +829,9 @@ suspend fun testOnlineApiConnection(
                     )
             )
             .put("temperature", 0)
-            .put("max_tokens", 1)
             .put("stream", false)
-            .toString()
+        applyThinkingControl(payloadObj, config.enableThinking, model, 16)
+        val payload = payloadObj.toString()
     
         val body = payload.toRequestBody("application/json; charset=utf-8".toMediaType())
         val requestBuilder = Request.Builder()

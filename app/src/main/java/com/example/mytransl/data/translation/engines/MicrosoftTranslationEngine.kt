@@ -80,6 +80,67 @@ class MicrosoftTranslationEngine(
         }
     }
 
+    override suspend fun translateBatch(
+        batch: List<String>,
+        sourceLanguage: String?,
+        targetLanguage: String,
+        settings: SettingsState
+    ): List<String> = withContext(Dispatchers.IO) {
+        if (batch.isEmpty()) return@withContext emptyList()
+        val subscriptionKey = config.apiKey.trim()
+        if (subscriptionKey.isEmpty()) {
+            throw IllegalArgumentException("请填写微软翻译订阅密钥")
+        }
+
+        val region = config.model.trim()
+        if (region.isEmpty()) {
+            throw IllegalArgumentException("请在模型字段中填写订阅区域 (Region)，例如 eastasia")
+        }
+
+        val endpoint = config.baseUrl.trim().ifEmpty { "https://api.cognitive.microsofttranslator.com" }.trimEnd('/')
+        val url = "$endpoint/translate?api-version=3.0"
+
+        val from = mapLanguageCode(sourceLanguage)
+        val to = mapLanguageCode(targetLanguage) ?: "en"
+
+        val fullUrl = buildString {
+            append(url)
+            if (!from.isNullOrEmpty()) {
+                append("&from=").append(from)
+            }
+            append("&to=").append(to)
+        }
+
+        val payloadArray = JSONArray()
+        batch.forEach { text ->
+            payloadArray.put(JSONObject().put("Text", text))
+        }
+        val body = payloadArray.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url(fullUrl)
+            .post(body)
+            .header("Ocp-Apim-Subscription-Key", subscriptionKey)
+            .header("Ocp-Apim-Subscription-Region", region)
+            .build()
+
+        client.newCall(request).execute().use { resp ->
+            val raw = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                throw IllegalStateException("HTTP ${resp.code}: $raw")
+            }
+
+            val jsonArray = runCatching { JSONArray(raw) }.getOrNull()
+                ?: throw IllegalStateException("无效的响应格式: $raw")
+
+            batch.mapIndexed { index, _ ->
+                val item = jsonArray.optJSONObject(index)
+                val translations = item?.optJSONArray("translations")
+                translations?.optJSONObject(0)?.optString("text")?.trim().orEmpty()
+            }
+        }
+    }
+
     private fun mapLanguageCode(lang: String?): String? {
         if (lang == null || lang == "自动检测") return null
         return when (lang) {

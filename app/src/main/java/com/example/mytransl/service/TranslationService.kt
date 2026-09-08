@@ -825,25 +825,26 @@ class TranslationService : Service() {
                     val targetW = realScreenWidth
                     val targetH = realScreenHeight
                     
-                    // 覆盖模式优化：先进行批量翻译，再生成 OverlayItem
-                    // 只有当语言不同时才需要翻译
+                    // 覆盖模式优化：一次性批量翻译（Batch Translation），再 1:1 映射回原始坐标框
                     val finalBlocks = if (sameLang) {
                         sortedBlocks
                     } else {
-                        // 逐条翻译（Sequential Translation）
-                        // 避免 Batch 模式下的合并、格式错误等问题
-                        sortedBlocks.mapNotNull { block ->
-                            // 过滤无意义文本块（纯符号、短代码等）
-                            if (!isTranslatableText(block.text)) return@mapNotNull null
-                            
-                            val trans = engineManager.translate(
-                                block.text,
+                        val translatableBlocks = sortedBlocks.filter { isTranslatableText(it.text) }
+                        if (translatableBlocks.isEmpty()) {
+                            emptyList()
+                        } else {
+                            val textsToTranslate = translatableBlocks.map { it.text }
+                            val translatedTexts = engineManager.translateBatch(
+                                textsToTranslate,
                                 source,
                                 settings.targetLanguage,
                                 settings
                             )
-                            // translate 现在失败时返回空字符串（已修改 TranslationEngineManager）
-                            if (trans.isNotEmpty()) block.copy(text = trans) else null
+                            // 严格 1:1 对应回原始坐标 TextBlock
+                            translatableBlocks.mapIndexedNotNull { index, block ->
+                                val trans = translatedTexts.getOrNull(index)?.trim().orEmpty()
+                                if (trans.isNotEmpty()) block.copy(text = trans) else null
+                            }
                         }
                     }
 
